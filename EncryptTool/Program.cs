@@ -45,8 +45,6 @@ namespace EncryptTool
             string ftpPass_PLAIN = "plain_ftp_password"; // (구)FTP 평문 암호
             // (ftpPath는 ConnectInfo.dll에 하드코딩하기로 함)
 
-            // -----------------------------------------------------------------
-
             try
             {
                 // 2. DB 연결 문자열 (평문) 생성
