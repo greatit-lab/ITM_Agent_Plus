@@ -18,22 +18,19 @@ namespace ITM_Agent
         [STAThread]
         static void Main()
         {
-            // ▼▼▼ [핵심 수정] OS 언어에 따라 다른 메시지를 표시하도록 로직을 수정합니다. ▼▼▼
-
-            // 1. OS의 UI 언어를 먼저 확인하고 설정합니다.
+            // (OS 언어 설정)
             var ui = CultureInfo.CurrentUICulture;
             if (!ui.Name.StartsWith("ko", StringComparison.OrdinalIgnoreCase))
             {
                 Thread.CurrentThread.CurrentUICulture = new CultureInfo("en-US");
             }
 
-            // 2. 관리자 권한을 확인합니다.
+            // (관리자 권한 확인)
             if (!IsRunningAsAdmin())
             {
                 string title;
                 string message;
 
-                // 3. 설정된 UI 언어에 따라 다른 메시지를 할당합니다.
                 if (CultureInfo.CurrentUICulture.Name.StartsWith("ko"))
                 {
                     title = "권한 필요";
@@ -46,26 +43,32 @@ namespace ITM_Agent
                     message = "ITM Agent requires administrator rights to collect hardware sensor data.\n\n" +
                               "Please close the program, then right-click the executable and select 'Run as administrator'.";
                 }
-
                 MessageBox.Show(message, title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return; // 권한이 없으면 프로그램 즉시 종료
             }
 
-            // --- 이하 코드는 기존과 동일 ---
-
+            // (중복 실행 Mutex 체크)
             mutex = new Mutex(true, appGuid, out bool createdNew);
             if (!createdNew)
             {
-                // (이 부분도 언어에 맞게 수정하면 더 좋습니다)
                 string title = CultureInfo.CurrentUICulture.Name.StartsWith("ko") ? "실행 확인" : "Already Running";
                 string message = CultureInfo.CurrentUICulture.Name.StartsWith("ko") ? "ITM Agent가 이미 실행 중입니다." : "ITM Agent is already running.";
                 MessageBox.Show(message, title, MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
+            // Connection.ini 존재 여부만 확인
+            string connectionIniPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Connection.ini");
+            if (!File.Exists(connectionIniPath))
+            {
+                MessageBox.Show("핵심 설정 파일(Connection.ini)이 없습니다. 설치가 잘못되었거나 파일이 누락되었습니다.", "설정 오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
+            // (AssemblyResolve)
             AppDomain.CurrentDomain.AssemblyResolve += (sender, args) =>
             {
                 string asmFile = new AssemblyName(args.Name).Name + ".dll";
@@ -81,6 +84,7 @@ namespace ITM_Agent
             mutex.ReleaseMutex();
         }
 
+        // (IsRunningAsAdmin 메서드)
         private static bool IsRunningAsAdmin()
         {
             try
