@@ -250,19 +250,19 @@ namespace ITM_Agent
         {
             if (e.CloseReason == CloseReason.UserClosing && !isExiting)
             {
-                e.Cancel = true; 
-                this.Hide(); 
+                e.Cancel = true;
+                this.Hide();
                 trayIcon.BalloonTipTitle = "ITM Agent";
                 trayIcon.BalloonTipText = "ITM Agent가 백그라운드에서 실행 중입니다.";
-                trayIcon.ShowBalloonTip(3000); 
-                return;                     
+                trayIcon.ShowBalloonTip(3000);
+                return;
             }
 
             if (!isExiting)
             {
-                e.Cancel = true;           
-                isExiting = true;           
-                PerformQuit();              
+                e.Cancel = true;
+                isExiting = true;
+                PerformQuit();
             }
         }
 
@@ -271,15 +271,15 @@ namespace ITM_Agent
             if (settingsManager.IsReadyToRun())
             {
                 UpdateMainStatus("Ready to Run", Color.Green);
-                btn_Run.Enabled = true; 
+                btn_Run.Enabled = true;
             }
             else
             {
                 UpdateMainStatus("Stopped!", Color.Red);
-                btn_Run.Enabled = false; 
+                btn_Run.Enabled = false;
             }
-            btn_Stop.Enabled = false; 
-            btn_Quit.Enabled = true;  
+            btn_Stop.Enabled = false;
+            btn_Quit.Enabled = true;
         }
 
         private void UpdateMainStatus(string status, Color color)
@@ -469,6 +469,8 @@ namespace ITM_Agent
 
                 /*─ 패널 동기화 ─*/
                 // (UpdateMainStatus 내부에서 이미 호출됨)
+                if (isDebugMode)
+                    logManager.LogDebug("FileWatcherManager & ucUploadPanel Watchers stopped successfully.");
             }
             catch (Exception ex)
             {
@@ -476,7 +478,6 @@ namespace ITM_Agent
                 UpdateMainStatus("Error Stopping!", Color.Red);
             }
         }
-        // ▲▲▲ [수정] 완료 ▲▲▲
 
         private void UpdateButtonsState()
         {
