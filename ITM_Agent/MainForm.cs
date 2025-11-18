@@ -387,7 +387,7 @@ namespace ITM_Agent
                 {
                     // InitializeEqpid()는 내부적으로 RegisterOrUpdateAgentInfo()를 호출합니다.
                     // 이 시점에는 DatabaseInfo 캐시가 만료되어 새 DB(10.0.0.2)로 접속합니다.
-                    eqpidManager.InitializeEqpid(); 
+                    eqpidManager.InitializeEqpid();
                 }
             }
             catch (Exception ex)
