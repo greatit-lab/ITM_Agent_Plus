@@ -40,9 +40,6 @@ namespace ITM_Agent.Services
         // 24시간 (운영용)
         // private const int POLL_INTERVAL_MS = 24 * 60 * 60 * 1000; 
 
-        // ▼▼▼ "공용 키" (ConnectInfo.dll/EncryptTool의 키와 100% 동일) ▼▼▼
-        private const string AES_COMMON_KEY = "greatit-lab-itm-agent-v1-secret";
-
         public ConfigUpdateService(SettingsManager settingsManager, LogManager logManager, MainForm mainForm, string eqpid)
         {
             _settingsManager = settingsManager;
@@ -223,8 +220,8 @@ namespace ITM_Agent.Services
                 string ftpConfigString = JsonConvert.SerializeObject(ftpConfig);
 
                 // 3. 각각 공용 키(AES)로 암호화
-                string encryptedDbConfig = EncryptAES(dbConfigString, AES_COMMON_KEY);
-                string encryptedFtpConfig = EncryptAES(ftpConfigString, AES_COMMON_KEY);
+                string encryptedDbConfig = EncryptAES(dbConfigString, AgentCryptoConfig.AES_COMMON_KEY);
+                string encryptedFtpConfig = EncryptAES(ftpConfigString, AgentCryptoConfig.AES_COMMON_KEY);
 
                 _logManager.LogDebug("[ConfigUpdateService] New DB/FTP configs encrypted using AES Common Key.");
 
