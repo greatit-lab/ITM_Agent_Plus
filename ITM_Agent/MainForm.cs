@@ -379,6 +379,23 @@ namespace ITM_Agent
                 }
             }
 
+            // Run 로직이 시작될 때 (특히 재시작 후)
+            // 항상 agent_info를 갱신하도록 호출합니다.
+            try
+            {
+                if (eqpidManager != null)
+                {
+                    // InitializeEqpid()는 내부적으로 RegisterOrUpdateAgentInfo()를 호출합니다.
+                    // 이 시점에는 DatabaseInfo 캐시가 만료되어 새 DB(10.0.0.2)로 접속합니다.
+                    eqpidManager.InitializeEqpid(); 
+                }
+            }
+            catch (Exception ex)
+            {
+                logManager.LogError($"Error updating agent_info during Run logic: {ex.Message}");
+                // (이 작업이 실패해도 Agent의 핵심 기능(감시)은 계속되어야 하므로 return하지 않습니다.)
+            }
+
             try
             {
                 /*──────── File Watcher (Type A) 시작 ────────*/
@@ -695,12 +712,12 @@ namespace ITM_Agent
             if (isDebugMode)
             {
                 logManager.LogEvent("Debug Mode: Enabled");
-                logManager.LogDebug("Debug mode enabled.");
+                logManager.LogDebug("debug mode enabled.");
             }
             else
             {
                 logManager.LogEvent("Debug Mode: Disabled");
-                logManager.LogDebug("Debug mode disabled.");
+                logManager.LogDebug("debug mode disabled.");
             }
         }
 
@@ -710,11 +727,25 @@ namespace ITM_Agent
             pMain.Controls.Add(control);
             control.Dock = DockStyle.Fill;
 
-            // 상태 동기화
+            // Option 패널 활성화/비활성화 명시적 호출
+            // 1. 모든 패널의 상태를 동기화합니다.
             if (control is ucConfigurationPanel cfg) cfg.InitializePanel(isRunning);
             else if (control is ucOverrideNamesPanel ov) ov.InitializePanel(isRunning);
             else if (control is ucPluginPanel plg) plg.InitializePanel(isRunning);
             else if (control is ucOptionPanel opt) opt.InitializePanel(isRunning);
+            // (다른 패널들도 필요시 InitializePanel 호출 추가)
+
+            // 2. Option 패널에 대한 특별 처리
+            if (control == ucOptionPanel)
+            {
+                // Option 패널이 표시될 때: 타이머 시작 및 즉시 새로고침
+                ucOptionPanel.ActivatePanel();
+            }
+            else
+            {
+                // 다른 패널이 표시될 때: Option 패널의 타이머 중지
+                ucOptionPanel?.DeactivatePanel();
+            }
         }
 
         private void UpdateMenusBasedOnType()
