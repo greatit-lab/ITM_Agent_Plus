@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading;
 using System.Reflection;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace ITM_Agent.Services
 {
@@ -102,8 +103,28 @@ namespace ITM_Agent.Services
             WriteLogWithRotation(logLine, fileName);
         }
 
+        // IP 마스킹을 위한 정규식 (클래스 멤버로 추가)
+        /// <summary>
+        /// IP 주소를 찾아서 마지막 옥텟을 마스킹하는 정규식입니다.
+        /// 예: "10.0.0.1" -> "*.*.*.1"
+        /// </summary>
+        private static readonly Regex _ipMaskRegex = new Regex(
+            @"\b(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\b",
+            RegexOptions.Compiled);
+
+        /// <summary>
+        /// 로그 메시지에서 IP 주소를 마스킹합니다.
+        /// </summary>
+        private string MaskIpAddress(string message)
+        {
+            // IP 주소 패턴(예: 10.0.0.1)을 찾아서 "*.*.*.1"로 변경합니다.
+            return _ipMaskRegex.Replace(message, "*.*.*.$4");
+        }
+        
         private void WriteLogWithRotation(string message, string fileName)
         {
+            // 로그 파일에 쓰기 전에 IP 마스킹 적용
+            string maskedMessage = MaskIpAddress(message);
             string filePath = Path.Combine(logFolderPath, fileName);
 
             try
@@ -126,7 +147,7 @@ namespace ITM_Agent.Services
                             fs.Seek(0, SeekOrigin.End);          // 항상 Append
                             using (var sw = new StreamWriter(fs, Encoding.UTF8))
                             {
-                                sw.WriteLine(message);
+                                sw.WriteLine(maskedMessage);
                             }
                         }
                         return;                                   // 성공 시 종료
