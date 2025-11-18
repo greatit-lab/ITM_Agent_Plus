@@ -783,7 +783,7 @@ namespace ITM_Agent
             }
 
             logManager.LogEvent("[MainForm] Waiting 10 seconds before auto-run...");
-            
+
             await Task.Delay(10000);
 
             if (btn_Run.Enabled)
