@@ -28,10 +28,9 @@ namespace ITM_Agent.ucPanel
 
         public event Action<bool> DebugModeChanged;
 
-        // ▼▼▼ [추가] 동시 새로고침 방지 플래그 ▼▼▼
+        // 동시 새로고침 방지 플래그
         private bool _isRefreshing = false;
         private readonly object _refreshLock = new object();
-        // ▲▲▲ [추가] 완료 ▲▲▲
 
         public ucOptionPanel(SettingsManager settings)
         {
@@ -63,16 +62,13 @@ namespace ITM_Agent.ucPanel
             /* 4) Settings.ini → UI 복원 */
             LoadOptionSettings();
 
-            // ▼▼▼ [수정] VisibleChanged 이벤트를 제거하고 수동 버튼 클릭만 남김 ▼▼▼
-            // this.VisibleChanged += UcOptionPanel_VisibleChanged; // (제거)
+            // VisibleChanged 이벤트를 제거하고 수동 버튼 클릭만 남김
             this.btnRefreshStatus.Click += BtnRefreshStatus_Click;
-            // ▲▲▲ [수정] 완료 ▲▲▲
-            
-            // ▼▼▼ [추가] PictureBox를 원형으로 만들기 위한 Paint 이벤트 핸들러 연결 ▼▼▼
+
+            // PictureBox를 원형으로 만들기 위한 Paint 이벤트 핸들러 연결
             this.pbDbStatus.Paint += PbStatus_Paint;
             this.pbObjStatus.Paint += PbStatus_Paint;
-            // ▲▲▲ [추가] 완료 ▲▲▲
-            
+
             // [추가] 타이머는 처음에 중지 상태로 시작 (ActivatePanel에서 제어)
             this.statusRefreshTimer.Stop();
         }
@@ -153,7 +149,7 @@ namespace ITM_Agent.ucPanel
 
             /* Settings 동기화 */
             settingsManager.IsInfoDeletionEnabled = enabled;
-            settingsManager.InfoRetentionDays     = enabled
+            settingsManager.InfoRetentionDays = enabled
                                                     ? int.Parse(cb_info_Retention.SelectedItem?.ToString() ?? "1")
                                                     : 0;
 
@@ -200,7 +196,7 @@ namespace ITM_Agent.ucPanel
             DebugModeChanged?.Invoke(isDebug);
         }
 
-        // ▼▼▼ [추가] IP 마스킹 헬퍼 (LogManager의 로직과 동일) ▼▼▼
+        // IP 마스킹 헬퍼 (LogManager의 로직과 동일)
         private static readonly Regex _ipMaskRegex = new Regex(
             @"\b(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\b",
             RegexOptions.Compiled);
@@ -209,7 +205,7 @@ namespace ITM_Agent.ucPanel
         {
             if (string.IsNullOrEmpty(ip))
                 return "N/A";
-            
+
             // "10.0.0.1" -> "*.*.*.1"
             return _ipMaskRegex.Replace(ip, "*.*.*.$4");
         }
@@ -223,10 +219,8 @@ namespace ITM_Agent.ucPanel
             }
             catch { return "Invalid CS"; }
         }
-        // ▲▲▲ [추가] 완료 ▲▲▲
 
-
-        // ▼▼▼ [추가] PictureBox를 원형으로 그리는 이벤트 핸들러 ▼▼▼
+        // PictureBox를 원형으로 그리는 이벤트 핸들러
         private void PbStatus_Paint(object sender, PaintEventArgs e)
         {
             PictureBox pb = sender as PictureBox;
@@ -244,18 +238,15 @@ namespace ITM_Agent.ucPanel
             {
                 e.Graphics.FillEllipse(brush, 0, 0, pb.Width - 1, pb.Height - 1);
             }
-            
+
             // 원형 테두리 그리기
             using (Pen pen = new Pen(Color.Black, 1))
             {
                 e.Graphics.DrawEllipse(pen, 0, 0, pb.Width - 1, pb.Height - 1);
             }
         }
-        // ▲▲▲ [추가] 완료 ▲▲▲
 
-        
-        // ▼▼▼ [수정] 연결 상태 확인 로직 (타이머 및 중복 실행 방지) ▼▼▼
-
+        // 연결 상태 확인 로직 (타이머 및 중복 실행 방지)
         private void BtnRefreshStatus_Click(object sender, EventArgs e)
         {
             // 수동 새로고침 (강제 실행)
@@ -298,8 +289,8 @@ namespace ITM_Agent.ucPanel
             {
                 // 강제 실행이 아닌데 이미 새로고침 중이면 반환
                 if (_isRefreshing && !force)
-                    return; 
-                
+                    return;
+
                 _isRefreshing = true;
             }
 
@@ -325,7 +316,7 @@ namespace ITM_Agent.ucPanel
                 {
                     _isRefreshing = false;
                 }
-                
+
                 // UI 스레드에서 버튼 활성화
                 this.Invoke(new Action(() =>
                 {
@@ -345,17 +336,17 @@ namespace ITM_Agent.ucPanel
                 // ConnectInfo.dll을 통해 현재 설정된 DB 연결 문자열을 가져옵니다.
                 string cs = DatabaseInfo.CreateDefault().GetConnectionString();
                 host = ExtractHostFromConnectionString(cs);
-                
+
                 // UI 스레드에서 IP 업데이트 (MaskIpAddress 호출)
                 this.Invoke(new Action(() => lblDbHost.Text = MaskIpAddress(host)));
 
                 using (var conn = new NpgsqlConnection(cs))
                 {
                     // 5초 타임아웃 설정
-                    conn.ConnectionString += ";Timeout=5"; 
+                    conn.ConnectionString += ";Timeout=5";
                     await conn.OpenAsync();
                 } // conn.Close()
-                
+
                 // UI 스레드에서 아이콘 업데이트
                 this.Invoke(new Action(() => pbDbStatus.BackColor = Color.LimeGreen));
             }
@@ -366,7 +357,7 @@ namespace ITM_Agent.ucPanel
                 {
                     pbDbStatus.BackColor = Color.Red;
                     // 호스트 IP가 확인된 상태에서 접속 실패 시 IP는 표시
-                    if(host != "N/A" && host != "Invalid CS")
+                    if (host != "N/A" && host != "Invalid CS")
                         lblDbHost.Text = MaskIpAddress(host);
                     else
                         lblDbHost.Text = "Connection Failed";
@@ -391,7 +382,7 @@ namespace ITM_Agent.ucPanel
 
                 if (string.IsNullOrEmpty(host))
                 {
-                     throw new Exception("FTP Host not configured.");
+                    throw new Exception("FTP Host not configured.");
                 }
 
                 this.Invoke(new Action(() => lblObjHost.Text = MaskIpAddress(host)));
@@ -432,6 +423,5 @@ namespace ITM_Agent.ucPanel
                 }));
             }
         }
-        // ▲▲▲ [수정] 완료 ▲▲▲
     }
 }
