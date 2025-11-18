@@ -103,8 +103,8 @@ namespace ITM_Agent.Services
 
                     // Connection.ini에서 현재 설정 읽기
                     string iniDbHost = GetHostFromConnectionString(cs);
-                    
-                    // ▼▼▼ [수정] FtpsInfo.CreateDefault()를 호출하여 FTP 호스트 가져오기 ▼▼▼
+
+                    // FtpsInfo.CreateDefault()를 호출하여 FTP 호스트 가져오기
                     string iniFtpHost = "N/A"; // (기본값)
                     try
                     {
@@ -113,16 +113,15 @@ namespace ITM_Agent.Services
                         if (string.IsNullOrEmpty(iniFtpHost))
                         {
                             iniFtpHost = "N/A";
-                            _logManager.LogWarning("[ConfigUpdateService] FtpsInfo.Host is null or empty.");
+                            _logManager.LogEvent("[ConfigUpdateService] FtpsInfo.Host is null or empty.");
                         }
-                    } 
-                    catch (Exception ex) 
+                    }
+                    catch (Exception ex)
                     {
                         // (ConnectInfo.dll이 [Ftps] Config를 읽거나 복호화/파싱하다 실패한 경우)
                         _logManager.LogError($"[ConfigUpdateService] Failed to get FTP Host from FtpsInfo: {ex.Message}");
                         iniFtpHost = "N/A"; // (실패 시 N/A 유지)
                     }
-                    // ▲▲▲ [수정] 완료 ▲▲▲
 
                     using (var cmd = new NpgsqlCommand(sqlPoll, conn))
                     {
@@ -168,12 +167,11 @@ namespace ITM_Agent.Services
                 {
                     await conn.OpenAsync();
                     
-                    // ▼▼▼ [수정] 요청하신 새 스키마(v2) 쿼리 ▼▼▼
+                    // 요청하신 새 스키마(v2) 쿼리
                     const string sqlFetchNew = @"
                         SELECT new_db_host, new_db_user, new_db_pw, new_db_port,
                                new_ftp_host, new_ftp_user, new_ftp_pw, new_ftp_port
                         FROM public.cfg_new_server LIMIT 1";
-                    // ▲▲▲ [수정] 완료 ▲▲▲
 
                     using (var cmd = new NpgsqlCommand(sqlFetchNew, conn))
                     using (var reader = await cmd.ExecuteReaderAsync())
@@ -183,18 +181,17 @@ namespace ITM_Agent.Services
                             _logManager.LogError("[ConfigUpdateService] UpdateFlag was 'yes', but no settings found in cfg_new_server. Aborting.");
                             return;
                         }
-                        
-                        // ▼▼▼ [수정] 새 스키마(v2) 인덱스 ▼▼▼
+
+                        // 새 스키마(v2) 인덱스
                         newDbHost = reader.GetString(0);
                         newDbUser = reader.GetString(1);
                         newDbPw = reader.GetString(2); // (평문)
                         newDbPort = reader.GetInt32(3);
-                        
+
                         newFtpHost = reader.GetString(4);
                         newFtpUser = reader.GetString(5);
                         newFtpPw = reader.GetString(6); // (평문)
                         newFtpPort = reader.GetInt32(7);
-                        // ▲▲▲ [수정] 완료 ▲▲▲
                     }
                 } // conn.Close()
                 _logManager.LogDebug("[ConfigUpdateService] Fetched new config from cfg_new_server.");
@@ -202,14 +199,14 @@ namespace ITM_Agent.Services
                 // 2. 새 평문 정보로 (신)DB 연결 문자열 및 (신)FTP JSON 생성
                 // (DB 이름은 기존과 동일하다고 가정)
                 string dbName = new NpgsqlConnectionStringBuilder(oldConnectionString).Database;
-                
+
                 var csBuilder = new NpgsqlConnectionStringBuilder
                 {
                     Host = newDbHost,
                     Port = newDbPort,
                     Username = newDbUser,
                     Password = newDbPw, // (평문 암호 포함)
-                    Database = dbName, 
+                    Database = dbName,
                     Encoding = "UTF8",
                     SslMode = SslMode.Disable,
                     SearchPath = "public"
@@ -251,7 +248,7 @@ namespace ITM_Agent.Services
                 _logManager.LogEvent("[ConfigUpdateService] AutoRunOnStart set to 1.");
 
                 // 7. MainForm에 Stop/Run 사이클 트리거 요청
-                _mainForm.TriggerRestartCycle(); 
+                _mainForm.TriggerRestartCycle();
             }
             catch (Exception ex)
             {
@@ -275,14 +272,14 @@ namespace ITM_Agent.Services
                 {
                     // (Connection.ini가 방금 바뀌었으므로 FtpsInfo.CreateDefault()를 다시 호출)
                     newFtpHost = FtpsInfo.CreateDefault().Host;
-                } catch {}
-                
+                } catch { }
+
                 _logManager.LogEvent($"[ConfigUpdateService] Confirming update success to NEW DB ({newDbHost})...");
 
                 using (var conn = new NpgsqlConnection(newCs))
                 {
                     await conn.OpenAsync();
-                    
+
                     // (9) cfg_server 테이블에 최종 상태 업데이트 (신규 DB에도 이 테이블이 있어야 함)
                     // (요청사항 반영: 컬럼명 'update', NOW()::timestamp(0) 사용)
                     const string sqlConfirm = @"
@@ -300,7 +297,7 @@ namespace ITM_Agent.Services
                         cmd.Parameters.AddWithValue("@ftp_host", newFtpHost ?? "N/A"); // (null 방지)
                         cmd.Parameters.AddWithValue("@eqpid", _eqpid);
                         int affected = await cmd.ExecuteNonQueryAsync();
-                        
+
                         if (affected > 0)
                         {
                             _logManager.LogEvent($"[ConfigUpdateService] Update confirmation sent. {affected} row(s) updated.");
@@ -308,12 +305,12 @@ namespace ITM_Agent.Services
                         else
                         {
                             // (신)DB에 cfg_server 레코드가 없는 경우 (구->신 DB 마이그레이션이 안된 경우)
-                            _logManager.LogWarning("[ConfigUpdateService] Update confirmation: EQPID not found in new DB's cfg_server. Attempting INSERT.");
+                            _logManager.LogEvent("[ConfigUpdateService] Update confirmation: EQPID not found in new DB's cfg_server. Attempting INSERT.");
                             const string sqlInsertConfirm = @"
                                 INSERT INTO public.cfg_server (eqpid, agent_db_host, agent_ftp_host, update_flag, ""update"")
                                 VALUES (@eqpid, @db_host, @ftp_host, 'no', NOW()::timestamp(0))
                                 ON CONFLICT (eqpid) DO NOTHING;";
-                            
+
                             using (var cmdInsert = new NpgsqlCommand(sqlInsertConfirm, conn))
                             {
                                 cmdInsert.Parameters.AddWithValue("@eqpid", _eqpid);
@@ -341,7 +338,7 @@ namespace ITM_Agent.Services
             }
             catch { return "N/A"; }
         }
-        
+
         /// <summary>
         /// (EncryptTool과 동일한 AES 암호화 헬퍼)
         /// </summary>
@@ -365,7 +362,6 @@ namespace ITM_Agent.Services
                 using (var ms = new MemoryStream())
                 {
                     using (var cs = new CryptoStream(ms, encryptor, CryptoStreamMode.Write))
-                    GAC
                     using (var sw = new StreamWriter(cs))
                     {
                         sw.Write(plainText);
@@ -378,7 +374,7 @@ namespace ITM_Agent.Services
                 return Convert.ToBase64String(fullCipher);
             }
         }
-        
+
         /// <summary>
         /// (ConnectInfo.dll과 동일한 AES 복호화 헬퍼)
         /// </summary>
