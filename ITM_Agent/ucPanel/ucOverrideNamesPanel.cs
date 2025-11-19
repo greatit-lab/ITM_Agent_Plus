@@ -21,6 +21,7 @@ namespace ITM_Agent.ucPanel
         private FileSystemWatcher folderWatcher;   // 폴더 감시기
 
         public event Action<string, Color> StatusUpdated;
+        public event Action<string> FileRenamed;
         private FileSystemWatcher baselineWatcher;
 
         // ----------------------------
@@ -621,18 +622,17 @@ namespace ITM_Agent.ucPanel
 
         private void LogFileRename(string oldPath, string newPath)
         {
-            // 변경된 파일 이름만 추출
             string changedFileName = Path.GetFileName(newPath);
-
-            // Event Log
             string logMessage = $"[ucOverrideNamesPanel] 파일 이름 변경: {oldPath} -> {changedFileName}";
             logManager.LogEvent(logMessage);
 
-            // Debug Log
             if (settingsManager.IsDebugMode)
             {
                 logManager.LogDebug($"[ucOverrideNamesPanel] 파일 변경 상세 로그 기록: {logMessage}");
             }
+
+            // ★★★ ucUploadPanel에게 알림 ★★★
+            FileRenamed?.Invoke(newPath);
         }
 
         private Dictionary<string, (string TimeInfo, string Prefix, string CInfo)> ExtractBaselineData(string[] files)
