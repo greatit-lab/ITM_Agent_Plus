@@ -172,8 +172,7 @@ namespace ITM_Agent.ucPanel
                         errorMessages.Add($"Error loading {Path.GetFileName(selectedDllPath)} (Plugin: {tempPluginName ?? "Unknown"}): {ex.Message}");
                         logManager.LogError($"Plugin load error: {ex}");
                     }
-                    // ▲▲▲ [수정] 완료 ▲▲▲
-                } 
+                }
 
                 if (addedCount > 0)
                 {
@@ -184,7 +183,7 @@ namespace ITM_Agent.ucPanel
                 if (errorMessages.Count > 0)
                 {
                     MessageBox.Show(string.Join("\n", errorMessages),
-                                    Properties.Resources.CAPTION_ERROR, 
+                                    Properties.Resources.CAPTION_ERROR,
                                     MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
                 else if (addedCount > 0 || skippedCount > 0)
@@ -194,7 +193,7 @@ namespace ITM_Agent.ucPanel
                         addedCount,
                         skippedCount);
                     MessageBox.Show(msg,
-                                    Properties.Resources.CAPTION_INFO, 
+                                    Properties.Resources.CAPTION_INFO,
                                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             }
@@ -204,7 +203,7 @@ namespace ITM_Agent.ucPanel
         {
             if (lb_PluginList.SelectedItems.Count == 0)
             {
-                MessageBox.Show(Properties.Resources.MSG_PLUGIN_SELECT_DELETE, 
+                MessageBox.Show(Properties.Resources.MSG_PLUGIN_SELECT_DELETE,
                                 Properties.Resources.CAPTION_INFO,
                                 MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
@@ -213,11 +212,11 @@ namespace ITM_Agent.ucPanel
             var selectedDisplayItems = lb_PluginList.SelectedItems.Cast<string>().ToList();
 
             string confirmMsg = string.Format(
-                Properties.Resources.MSG_PLUGIN_CONFIRM_DELETE, 
+                Properties.Resources.MSG_PLUGIN_CONFIRM_DELETE,
                 selectedDisplayItems.Count);
             DialogResult result = MessageBox.Show(
                 confirmMsg,
-                Properties.Resources.CAPTION_WARNING, 
+                Properties.Resources.CAPTION_WARNING,
                 MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
 
             if (result != DialogResult.Yes) return;
@@ -258,10 +257,9 @@ namespace ITM_Agent.ucPanel
 
                 loadedPlugins.Remove(pluginItem);
                 settingsManager.RemoveKeyFromSection("RegPlugins", pluginName);
-                
-                // ▼▼▼ [추가] 런타임 캐시에서도 제거 ▼▼▼
+
+                // 런타임 캐시에서도 제거
                 _pluginCache.Remove(pluginName);
-                // ▲▲▲ [추가] 완료 ▲▲▲
 
                 logManager.LogEvent($"Plugin removed: {pluginName}");
                 removedCount++;
