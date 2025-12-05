@@ -14,6 +14,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using ITM_Agent.Properties;
+using System.Diagnostics; // [추가] Stopwatch 사용
 
 namespace ITM_Agent.ucPanel
 {
@@ -397,90 +398,161 @@ namespace ITM_Agent.ucPanel
 
         #endregion
 
-        #region --- 파일 이벤트 핸들러 ---
+        #region --- 파일 이벤트 핸들러 (수정됨) ---
+
+        /// <summary>
+        /// 파일이 다른 프로세스(장비/Agent복사)에 의해 잠겨있는지 확인하고,
+        /// 완전히 접근 가능할 때까지 대기합니다. (최대 대기 시간 설정 가능)
+        /// </summary>
+        private bool WaitForFileReady(string filePath, int timeoutSeconds = 60)
+        {
+            var sw = Stopwatch.StartNew();
+
+            while (sw.Elapsed.TotalSeconds < timeoutSeconds)
+            {
+                try
+                {
+                    if (!File.Exists(filePath)) return false;
+
+                    // 파일을 배타적 모드(FileShare.None)로 열어봅니다.
+                    // 성공하면 아무도 이 파일을 쓰고 있지 않다는 뜻입니다.
+                    using (var stream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.None))
+                    {
+                        if (stream.Length > 0)
+                        {
+                            return true; // 파일 사용 가능
+                        }
+                    }
+                }
+                catch (IOException)
+                {
+                    // 파일이 잠겨 있으면 여기서 걸립니다.
+                    // 로그를 너무 많이 남기지 않도록 Debug 모드일 때만 남기거나 생략
+                }
+                catch (Exception ex)
+                {
+                    _logManager.LogError($"[WaitForFileReady] Error checking file {filePath}: {ex.Message}");
+                    return false;
+                }
+
+                Thread.Sleep(500); // 0.5초 대기 후 재시도
+            }
+
+            _logManager.LogError($"[WaitForFileReady] Timeout waiting for file: {filePath}");
+            return false; // 타임아웃
+        }
 
         private void OnTab1FileEvent(object sender, FileSystemEventArgs e)
         {
             // 1. _#1_ 원본 파일 무시
             if (e.Name.Contains("_#1_")) return;
 
-            Thread.Sleep(1000); // 파일 쓰기 대기
-
-            // 2. 메모리 관리 및 디바운스
-            string fileKey = e.FullPath.ToUpperInvariant();
-            DateTime now = DateTime.Now;
-
-            // 메모리 청소
-            if (_lastProcessEventTime.Count > 2000)
+            // [수정] Thread.Sleep(1000) 제거 및 Task.Run 내부에서 대기
+            Task.Run(() =>
             {
-                lock (_cleanupLock)
+                try
                 {
+                    // 파일 안정화 대기 (최대 60초)
+                    // 장비 또는 Agent가 파일을 쓰는 동안 대기하여 Lock/접근 오류 방지
+                    if (!WaitForFileReady(e.FullPath, 60))
+                    {
+                        _logManager.LogEvent($"[Tab1] File locked or copy failed (timeout), skipping: {e.Name}");
+                        return;
+                    }
+
+                    // 2. 메모리 관리 및 디바운스
+                    string fileKey = e.FullPath.ToUpperInvariant();
+                    DateTime now = DateTime.Now;
+
+                    // 메모리 청소
                     if (_lastProcessEventTime.Count > 2000)
                     {
-                        var oldKeys = _lastProcessEventTime.Where(kv => (now - kv.Value).TotalMinutes > 5).Select(kv => kv.Key).ToList();
-                        foreach (var key in oldKeys) _lastProcessEventTime.TryRemove(key, out _);
+                        lock (_cleanupLock)
+                        {
+                            if (_lastProcessEventTime.Count > 2000)
+                            {
+                                var oldKeys = _lastProcessEventTime.Where(kv => (now - kv.Value).TotalMinutes > 5).Select(kv => kv.Key).ToList();
+                                foreach (var key in oldKeys) _lastProcessEventTime.TryRemove(key, out _);
+                            }
+                        }
                     }
+
+                    // 디바운스
+                    if (_lastProcessEventTime.TryGetValue(fileKey, out var lastTime) && (now - lastTime).TotalSeconds < DebounceSeconds) return;
+                    _lastProcessEventTime[fileKey] = now;
+
+                    // 3. 규칙 매핑 (경로 정규화)
+                    string folder = NormalizePath(Path.GetDirectoryName(e.FullPath));
+                    if (!_tab1RuleMap.TryGetValue(folder, out string pluginName))
+                    {
+                        var parent = NormalizePath(Directory.GetParent(e.FullPath)?.FullName);
+                        if (string.IsNullOrEmpty(parent) || !_tab1RuleMap.TryGetValue(parent, out pluginName))
+                        {
+                            if (_settingsManager.IsDebugMode) _logManager.LogDebug($"[Tab1] No rule for '{folder}' (File: {e.Name})");
+                            return;
+                        }
+                    }
+
+                    // 4. 실행
+                    _logManager.LogEvent($"[Tab1] Triggered: {e.Name} ({e.ChangeType}) -> Plugin: {pluginName}");
+                    RunPlugin(pluginName, e.FullPath);
                 }
-            }
-
-            // 디바운스
-            if (_lastProcessEventTime.TryGetValue(fileKey, out var lastTime) && (now - lastTime).TotalSeconds < DebounceSeconds) return;
-            _lastProcessEventTime[fileKey] = now;
-
-            // 3. 규칙 매핑 (경로 정규화)
-            string folder = NormalizePath(Path.GetDirectoryName(e.FullPath));
-            if (!_tab1RuleMap.TryGetValue(folder, out string pluginName))
-            {
-                var parent = NormalizePath(Directory.GetParent(e.FullPath)?.FullName);
-                if (string.IsNullOrEmpty(parent) || !_tab1RuleMap.TryGetValue(parent, out pluginName))
+                catch (Exception ex)
                 {
-                    if (_settingsManager.IsDebugMode) _logManager.LogDebug($"[Tab1] No rule for '{folder}' (File: {e.Name})");
-                    return;
+                    _logManager.LogError($"[Tab1] Error processing file {e.Name}: {ex.Message}");
                 }
-            }
-
-            // 4. 실행
-            _logManager.LogEvent($"[Tab1] Triggered: {e.Name} ({e.ChangeType}) -> Plugin: {pluginName}");
-            RunPlugin(pluginName, e.FullPath);
+            });
         }
 
         private void OnTab2FileChanged(object sender, FileSystemEventArgs e)
         {
             if (e.Name.Contains("_#1_")) return;
 
-            Thread.Sleep(200);
-
-            string fileKey = e.FullPath.ToUpperInvariant();
-            DateTime now = DateTime.Now;
-
-            if (_lastProcessEventTime.Count > 2000)
+            // [수정] Thread.Sleep(200) 제거 및 Task.Run 내부에서 대기
+            Task.Run(() =>
             {
-                lock (_cleanupLock)
+                try
                 {
+                    // 증분 감시의 경우 파일이 매우 빠르게 생성될 수 있으므로 대기 필수
+                    if (!WaitForFileReady(e.FullPath, 60)) return;
+
+                    string fileKey = e.FullPath.ToUpperInvariant();
+                    DateTime now = DateTime.Now;
+
                     if (_lastProcessEventTime.Count > 2000)
                     {
-                        var oldKeys = _lastProcessEventTime.Where(kv => (now - kv.Value).TotalMinutes > 5).Select(kv => kv.Key).ToList();
-                        foreach (var key in oldKeys) _lastProcessEventTime.TryRemove(key, out _);
+                        lock (_cleanupLock)
+                        {
+                            if (_lastProcessEventTime.Count > 2000)
+                            {
+                                var oldKeys = _lastProcessEventTime.Where(kv => (now - kv.Value).TotalMinutes > 5).Select(kv => kv.Key).ToList();
+                                foreach (var key in oldKeys) _lastProcessEventTime.TryRemove(key, out _);
+                            }
+                        }
+                    }
+
+                    if (_lastProcessEventTime.TryGetValue(fileKey, out var lastTime) && (now - lastTime).TotalSeconds < DebounceSeconds) return;
+                    _lastProcessEventTime[fileKey] = now;
+
+                    string folder = NormalizePath(Path.GetDirectoryName(e.FullPath));
+                    string filter = (sender as FileSystemWatcher)?.Filter.ToUpperInvariant();
+                    string mapKey = $"{folder}|{filter}";
+
+                    if (_tab2RuleMap.TryGetValue(mapKey, out string pluginName))
+                    {
+                        _logManager.LogEvent($"[Tab2] Triggered: {e.Name} -> Plugin: {pluginName}");
+                        RunPlugin(pluginName, e.FullPath);
+                    }
+                    else
+                    {
+                        if (_settingsManager.IsDebugMode) _logManager.LogDebug($"[Tab2] No rule for '{mapKey}'");
                     }
                 }
-            }
-
-            if (_lastProcessEventTime.TryGetValue(fileKey, out var lastTime) && (now - lastTime).TotalSeconds < DebounceSeconds) return;
-            _lastProcessEventTime[fileKey] = now;
-
-            string folder = NormalizePath(Path.GetDirectoryName(e.FullPath));
-            string filter = (sender as FileSystemWatcher)?.Filter.ToUpperInvariant();
-            string mapKey = $"{folder}|{filter}";
-
-            if (_tab2RuleMap.TryGetValue(mapKey, out string pluginName))
-            {
-                _logManager.LogEvent($"[Tab2] Triggered: {e.Name} -> Plugin: {pluginName}");
-                RunPlugin(pluginName, e.FullPath);
-            }
-            else
-            {
-                if (_settingsManager.IsDebugMode) _logManager.LogDebug($"[Tab2] No rule for '{mapKey}'");
-            }
+                catch (Exception ex)
+                {
+                    _logManager.LogError($"[Tab2] Error processing file {e.Name}: {ex.Message}");
+                }
+            });
         }
 
         private void RunPlugin(string pluginName, string filePath)
