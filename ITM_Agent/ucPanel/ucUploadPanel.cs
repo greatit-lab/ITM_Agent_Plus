@@ -47,7 +47,7 @@ namespace ITM_Agent.ucPanel
 
         // [신규] 실행 및 일시정지 상태 관리
         private bool isRunning = false;
-        private bool isPaused = false; 
+        private bool isPaused = false;
 
         public ucUploadPanel(ucConfigurationPanel configPanel, ucPluginPanel pluginPanel, SettingsManager settingsManager,
             ucOverrideNamesPanel ovPanel, ucImageTransPanel imageTransPanel)
@@ -286,10 +286,10 @@ namespace ITM_Agent.ucPanel
         public void PauseWatching()
         {
             if (!isRunning) return;
-            
+
             isPaused = true;
             StopWatchers();
-            
+
             _logManager.LogEvent("[ucUploadPanel] Watchers Paused (Server Holding).");
         }
 
@@ -301,7 +301,7 @@ namespace ITM_Agent.ucPanel
             isPaused = false;
             StopWatchers();      // 안전하게 리셋
             InitializeWatchers(); // 다시 시작
-            
+
             _logManager.LogEvent("[ucUploadPanel] Watchers Resumed.");
         }
 
@@ -309,7 +309,7 @@ namespace ITM_Agent.ucPanel
         public void UpdateStatusOnRun(bool isRunning)
         {
             this.isRunning = isRunning;
-            
+
             // isRunning이 true이면 (Running or Holding) UI는 잠금
             SetControlsEnabled(!isRunning);
 
