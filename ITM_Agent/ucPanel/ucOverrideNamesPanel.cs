@@ -40,9 +40,9 @@ namespace ITM_Agent.ucPanel
             this.isDebugMode = isDebugMode;
 
             InitializeComponent();
-            
+
             // 중복 할당 제거 (위에서 이미 할당함)
-            
+
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
             // logManager가 주입되었으므로 별도 생성하지 않고 주입된 인스턴스 사용
             // 만약 별도 인스턴스가 필요하다면 new LogManager(baseDir) 사용 가능하나, 주입된 것을 권장
@@ -831,7 +831,7 @@ namespace ITM_Agent.ucPanel
         {
             // 이 메서드에서는 컨트롤 활성화 여부를 건드리지 않습니다.
             // MainForm에서 UpdateStatusOnRun(bool)을 호출하여 제어합니다.
-            
+
             //bool isRunning = status == "Running...";
             //SetControlEnabled(!isRunning); // 삭제됨
 
