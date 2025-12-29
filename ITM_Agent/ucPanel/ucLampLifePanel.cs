@@ -1,4 +1,4 @@
-// ITM_Agnet/ucPanel/ucLampLifePanel.cs
+// ITM_Agent/ucPanel/ucLampLifePanel.cs
 using ITM_Agent.Services;
 using System;
 using System.Drawing;
@@ -80,7 +80,12 @@ namespace ITM_Agent.ucPanel
 
             try
             {
-                bool success = await _lampLifeService.ExecuteCollectionAsync();
+                // ▼▼▼ [수정] 변경된 메서드 이름(ExecuteUiCollectionAsync) 사용 ▼▼▼
+                bool success = await _lampLifeService.ExecuteUiCollectionAsync();
+                
+                // (참고: LampLifeService 내부에서 CollectionCompleted 이벤트를 발생시키므로
+                //  UpdateLastCollectLabel이 자동으로 호출되지만, 
+                //  확실한 UI 반응을 위해 여기서도 상태 업데이트를 수행합니다.)
                 UpdateLastCollectLabel(success, DateTime.Now);
             }
             catch (Exception)
@@ -89,7 +94,7 @@ namespace ITM_Agent.ucPanel
             }
             finally
             {
-                // ▼▼▼ [수정] Agent가 실행 중이 아닐 때만 버튼을 다시 활성화 ▼▼▼
+                // Agent가 실행 중이 아닐 때만 버튼을 다시 활성화
                 if (!_isAgentRunning)
                 {
                     btnManualCollect.Enabled = true;
@@ -103,7 +108,6 @@ namespace ITM_Agent.ucPanel
             UpdateControlsEnabled();
         }
 
-        // ▼▼▼ [핵심 수정] 컨트롤 활성화/비활성화 로직 통합 및 수정 ▼▼▼
         private void UpdateControlsEnabled()
         {
             // Agent가 실행 중이 아닐 때만 설정 컨트롤들을 활성화합니다.
