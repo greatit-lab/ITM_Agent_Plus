@@ -40,15 +40,12 @@ namespace ITM_Agent.ucPanel
             this.isDebugMode = isDebugMode;
 
             InitializeComponent();
-            this.settingsManager = settingsManager;
-            this.logManager = logManager;
-            this.isDebugMode = isDebugMode;
-
-            this.settingsManager = settingsManager ?? throw new ArgumentNullException(nameof(settingsManager));
-            this.configPanel = configPanel ?? throw new ArgumentNullException(nameof(configPanel));
-
+            
+            // 중복 할당 제거 (위에서 이미 할당함)
+            
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            logManager = new LogManager(baseDir);
+            // logManager가 주입되었으므로 별도 생성하지 않고 주입된 인스턴스 사용
+            // 만약 별도 인스턴스가 필요하다면 new LogManager(baseDir) 사용 가능하나, 주입된 것을 권장
 
             if (settingsManager.IsDebugMode)
             {
@@ -763,10 +760,14 @@ namespace ITM_Agent.ucPanel
 
         #endregion
 
-        #region 기타 기존 메서드들 (상태 갱신, CompareAndRenameFiles 등) 그대로
+        #region Public Methods & Status Control
 
+        // ▼▼▼ [핵심 수정] 컨트롤 활성화/비활성화 로직을 이곳으로 일원화 ▼▼▼
         public void UpdateStatusOnRun(bool isRunning)
         {
+            // isRunning이 true (Running or Holding) -> Controls Disabled
+            SetControlEnabled(!isRunning);
+
             string status = isRunning ? "Running" : "Stopped";
             Color statusColor = isRunning ? Color.Green : Color.Red;
 
@@ -811,6 +812,13 @@ namespace ITM_Agent.ucPanel
 
         public void SetControlEnabled(bool isEnabled)
         {
+            // UI 스레드 안전 호출 (필요 시)
+            if (this.InvokeRequired)
+            {
+                this.Invoke(new Action(() => SetControlEnabled(isEnabled)));
+                return;
+            }
+
             btn_BaseClear.Enabled = isEnabled;
             btn_SelectFolder.Enabled = isEnabled;
             btn_Remove.Enabled = isEnabled;
@@ -818,10 +826,14 @@ namespace ITM_Agent.ucPanel
             lb_TargetComparePath.Enabled = isEnabled;
         }
 
+        // ▼▼▼ [핵심 수정] UpdateStatus는 컨트롤 상태를 변경하지 않도록 수정 ▼▼▼
         public void UpdateStatus(string status)
         {
-            bool isRunning = status == "Running...";
-            SetControlEnabled(!isRunning);
+            // 이 메서드에서는 컨트롤 활성화 여부를 건드리지 않습니다.
+            // MainForm에서 UpdateStatusOnRun(bool)을 호출하여 제어합니다.
+            
+            //bool isRunning = status == "Running...";
+            //SetControlEnabled(!isRunning); // 삭제됨
 
             if (isDebugMode)
             {
@@ -909,7 +921,6 @@ namespace ITM_Agent.ucPanel
             }
             base.Dispose(disposing);
         }
-        #endregion
 
         public string EnsureOverrideAndReturnPath(string originalPath, int timeoutMs = 180_000)
         {
@@ -977,5 +988,6 @@ namespace ITM_Agent.ucPanel
             }
             return null;                                      // 대상 파일 없음 → skip
         }
+        #endregion
     }
 }
