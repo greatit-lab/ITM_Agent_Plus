@@ -317,7 +317,7 @@ namespace ITM_Agent.Services
                                     updateCmd.Parameters.AddWithValue("@ts", cleanAgentTime); // 최신 수집 시간 반영
                                     updateCmd.Parameters.AddWithValue("@eqpid", eqpid);
                                     updateCmd.Parameters.AddWithValue("@no", pgRow.LampNo.Value);
-                                    
+
                                     await updateCmd.ExecuteNonQueryAsync();
                                     _logManager.LogEvent($"[LampLifeService] Updated '{pgRow.LampName}' (ID:{pgRow.LampNo}) : Changed {cleanLastChanged}");
                                 }
@@ -430,7 +430,7 @@ namespace ITM_Agent.Services
                         {
                             cmd.Parameters["@eqpid"].Value = eqpid;
                             cmd.Parameters["@name"].Value = lamp.LampName;
-                            
+
                             // [수정] 절삭된 시간 사용
                             cmd.Parameters["@ts"].Value = cleanNow;
 
