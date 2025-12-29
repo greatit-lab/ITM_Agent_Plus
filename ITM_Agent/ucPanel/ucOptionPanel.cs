@@ -288,7 +288,7 @@ namespace ITM_Agent.ucPanel
             {
                 string cs = DatabaseInfo.CreateDefault().GetConnectionString();
                 host = ExtractHostFromConnectionString(cs);
-                
+
                 // [수정] 수동 체크 시에도 Pooling 끄기
                 if (!cs.Contains("Pooling=")) cs += ";Pooling=false";
                 cs += ";Timeout=3";
