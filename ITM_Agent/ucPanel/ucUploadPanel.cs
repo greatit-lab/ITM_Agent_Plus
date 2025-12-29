@@ -14,13 +14,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using ITM_Agent.Properties;
-using System.Diagnostics; // [추가] Stopwatch 사용
+using System.Diagnostics;
 
 namespace ITM_Agent.ucPanel
 {
     public partial class ucUploadPanel : UserControl
     {
-        // --- Watcher 및 상태 관리 ---
         private readonly List<FileSystemWatcher> _tab1Watchers = new List<FileSystemWatcher>();
         private readonly List<FileSystemWatcher> _tab2Watchers = new List<FileSystemWatcher>();
         private readonly ConcurrentDictionary<string, string> _tab1RuleMap = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -28,13 +27,11 @@ namespace ITM_Agent.ucPanel
         private readonly object _lockTab1 = new object();
         private readonly object _lockTab2 = new object();
 
-        // 중복 이벤트 방지 (Debounce) 및 메모리 관리용
         private readonly ConcurrentDictionary<string, DateTime> _lastProcessEventTime =
             new ConcurrentDictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         private const double DebounceSeconds = 2.0;
-        private readonly object _cleanupLock = new object(); // 메모리 청소 동기화 락
+        private readonly object _cleanupLock = new object();
 
-        // --- 참조 객체 ---
         private readonly ucConfigurationPanel _configPanel;
         private readonly ucPluginPanel _pluginPanel;
         private readonly SettingsManager _settingsManager;
@@ -42,13 +39,15 @@ namespace ITM_Agent.ucPanel
         private readonly ucOverrideNamesPanel _overridePanel;
         private readonly ucImageTransPanel _imageTransPanel;
 
-        // 플러그인 메타데이터 캐시 (TaskName, Filter, Override여부)
         private readonly Dictionary<string, (string Task, string Filter, bool RequiresOverride)> _pluginMetadataCache =
             new Dictionary<string, (string Task, string Filter, bool RequiresOverride)>(StringComparer.OrdinalIgnoreCase);
 
-        // INI 섹션 이름
         private const string Tab1Section = "[UploadRulesTab1]";
         private const string Tab2Section = "[UploadRulesTab2]";
+
+        // [신규] 실행 및 일시정지 상태 관리
+        private bool isRunning = false;
+        private bool isPaused = false; 
 
         public ucUploadPanel(ucConfigurationPanel configPanel, ucPluginPanel pluginPanel, SettingsManager settingsManager,
             ucOverrideNamesPanel ovPanel, ucImageTransPanel imageTransPanel)
@@ -63,17 +62,14 @@ namespace ITM_Agent.ucPanel
 
             _logManager = new LogManager(AppDomain.CurrentDomain.BaseDirectory);
 
-            // ★ [핵심] Override 패널의 이름 변경 완료 이벤트 구독 ★
             if (_overridePanel != null)
             {
                 _overridePanel.FileRenamed += OnOverrideFileRenamed;
             }
 
-            // 이벤트 등록
             this.Load += UcUploadPanel_Load;
             _pluginPanel.PluginsChanged += OnPluginsChanged;
 
-            // 버튼 핸들러 연결
             btnCatAdd.Click += BtnCatAdd_Click;
             btnCatRemove.Click += BtnCatRemove_Click;
             btnCatSave.Click += BtnCatSave_Click;
@@ -82,11 +78,9 @@ namespace ITM_Agent.ucPanel
             btnLiveRemove.Click += BtnLiveRemove_Click;
             btnLiveSave.Click += BtnLiveSave_Click;
 
-            // 초기화
             InitializeDataGridViews();
             LoadSettings();
 
-            // 그리드 이벤트 연결
             dgvCategorized.CellValueChanged += Dgv_CellValueChanged;
             dgvLiveMonitoring.CellValueChanged += Dgv_CellValueChanged;
             dgvCategorized.CellFormatting += Dgv_CellFormatting;
@@ -100,7 +94,6 @@ namespace ITM_Agent.ucPanel
             RefreshPluginMetadataCache();
         }
 
-        // --- [Helper] 경로 정규화 메서드 ---
         private string NormalizePath(string path)
         {
             if (string.IsNullOrEmpty(path)) return "";
@@ -111,10 +104,11 @@ namespace ITM_Agent.ucPanel
             catch { return path.ToUpperInvariant(); }
         }
 
-        #region --- [추가] Override 직접 연동 핸들러 ---
-
         private void OnOverrideFileRenamed(string newFilePath)
         {
+            // 서버 끊김 상태면 처리 안 함
+            if (isPaused) return;
+
             Task.Run(() =>
             {
                 try
@@ -135,13 +129,10 @@ namespace ITM_Agent.ucPanel
             });
         }
 
-        #endregion
-
         #region --- UI 초기화 및 설정 로드 ---
 
         private void InitializeDataGridViews()
         {
-            // Tab 1 Grid (완료형)
             dgvCategorized.Columns.Clear();
             dgvCategorized.AutoGenerateColumns = false;
             dgvCategorized.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
@@ -149,7 +140,6 @@ namespace ITM_Agent.ucPanel
             dgvCategorized.Columns.Add(new DataGridViewComboBoxColumn { Name = "WatchFolder", HeaderText = Properties.Resources.UPLOAD_COL_CAT_FOLDER, DataPropertyName = "WatchFolder", FillWeight = 58 });
             dgvCategorized.Columns.Add(new DataGridViewComboBoxColumn { Name = "PluginName", HeaderText = Properties.Resources.UPLOAD_COL_PLUGIN, DataPropertyName = "PluginName", FillWeight = 27 });
 
-            // Tab 2 Grid (증분형)
             dgvLiveMonitoring.Columns.Clear();
             dgvLiveMonitoring.AutoGenerateColumns = false;
             dgvLiveMonitoring.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
@@ -265,7 +255,6 @@ namespace ITM_Agent.ucPanel
             _logManager.LogEvent($"[ucUploadPanel] Settings saved for section: {section}");
         }
 
-        // --- 버튼 핸들러 ---
         private void BtnCatAdd_Click(object sender, EventArgs e) { int idx = dgvCategorized.Rows.Add(); dgvCategorized.Rows[idx].Cells["TaskName"].Value = "New Task"; }
         private void BtnCatRemove_Click(object sender, EventArgs e) { foreach (DataGridViewRow row in dgvCategorized.SelectedRows) if (!row.IsNewRow) dgvCategorized.Rows.Remove(row); }
         private void BtnCatSave_Click(object sender, EventArgs e)
@@ -285,13 +274,56 @@ namespace ITM_Agent.ucPanel
 
         #endregion
 
-        #region --- Watcher 시작 / 중지 ---
+        #region --- [핵심 수정] Watcher 및 상태 제어 ---
 
+        // [신규] MainForm에서 화면 전환 시 상태 동기화를 위해 호출
+        public void InitializePanel(bool isRunning)
+        {
+            UpdateStatusOnRun(isRunning);
+        }
+
+        // [신규] 서버 끊김 시 감시 일시 정지 (UI 잠금은 유지)
+        public void PauseWatching()
+        {
+            if (!isRunning) return;
+            
+            isPaused = true;
+            StopWatchers();
+            
+            _logManager.LogEvent("[ucUploadPanel] Watchers Paused (Server Holding).");
+        }
+
+        // [신규] 서버 복구 시 감시 재개
+        public void ResumeWatching()
+        {
+            if (!isRunning) return;
+
+            isPaused = false;
+            StopWatchers();      // 안전하게 리셋
+            InitializeWatchers(); // 다시 시작
+            
+            _logManager.LogEvent("[ucUploadPanel] Watchers Resumed.");
+        }
+
+        // 실행 상태 변경 (Run/Stop 버튼 클릭 시)
         public void UpdateStatusOnRun(bool isRunning)
         {
+            this.isRunning = isRunning;
+            
+            // isRunning이 true이면 (Running or Holding) UI는 잠금
             SetControlsEnabled(!isRunning);
-            if (isRunning) { StopWatchers(); InitializeWatchers(); }
-            else { StopWatchers(); }
+
+            // 감시 로직은 '실행중'이고 '일시정지 아님' 상태일 때만 켬
+            if (isRunning && !isPaused)
+            {
+                StopWatchers();
+                InitializeWatchers();
+            }
+            else
+            {
+                // Stop 상태이거나 Holding(Paused) 상태면 감시 끔
+                StopWatchers();
+            }
         }
 
         private void InitializeWatchers()
@@ -299,7 +331,6 @@ namespace ITM_Agent.ucPanel
             _logManager.LogEvent("[ucUploadPanel] Initializing watchers...");
             InitializeComboBoxColumns();
 
-            // [Tab 1] Watchers
             lock (_lockTab1)
             {
                 _tab1RuleMap.Clear();
@@ -330,7 +361,6 @@ namespace ITM_Agent.ucPanel
                             NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite,
                             EnableRaisingEvents = true
                         };
-                        // ★ [핵심] Created, Renamed, Changed 모두 연결
                         watcher.Created += OnTab1FileEvent;
                         watcher.Renamed += OnTab1FileEvent;
                         watcher.Changed += OnTab1FileEvent;
@@ -342,7 +372,6 @@ namespace ITM_Agent.ucPanel
                 }
             }
 
-            // [Tab 2] Watchers
             lock (_lockTab2)
             {
                 _tab2RuleMap.Clear();
@@ -366,7 +395,6 @@ namespace ITM_Agent.ucPanel
                             NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
                             EnableRaisingEvents = true
                         };
-                        // ★ [핵심] Tab2도 모든 이벤트 연결
                         watcher.Created += OnTab2FileChanged;
                         watcher.Renamed += OnTab2FileChanged;
                         watcher.Changed += OnTab2FileChanged;
@@ -398,73 +426,50 @@ namespace ITM_Agent.ucPanel
 
         #endregion
 
-        #region --- 파일 이벤트 핸들러 (수정됨) ---
+        #region --- 파일 이벤트 핸들러 ---
 
-        /// <summary>
-        /// 파일이 다른 프로세스(장비/Agent복사)에 의해 잠겨있는지 확인하고,
-        /// 완전히 접근 가능할 때까지 대기합니다. (최대 대기 시간 설정 가능)
-        /// </summary>
         private bool WaitForFileReady(string filePath, int timeoutSeconds = 60)
         {
             var sw = Stopwatch.StartNew();
-
             while (sw.Elapsed.TotalSeconds < timeoutSeconds)
             {
                 try
                 {
                     if (!File.Exists(filePath)) return false;
-
-                    // 파일을 배타적 모드(FileShare.None)로 열어봅니다.
-                    // 성공하면 아무도 이 파일을 쓰고 있지 않다는 뜻입니다.
                     using (var stream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.None))
                     {
-                        if (stream.Length > 0)
-                        {
-                            return true; // 파일 사용 가능
-                        }
+                        if (stream.Length > 0) return true;
                     }
                 }
-                catch (IOException)
-                {
-                    // 파일이 잠겨 있으면 여기서 걸립니다.
-                    // 로그를 너무 많이 남기지 않도록 Debug 모드일 때만 남기거나 생략
-                }
+                catch (IOException) { }
                 catch (Exception ex)
                 {
                     _logManager.LogError($"[WaitForFileReady] Error checking file {filePath}: {ex.Message}");
                     return false;
                 }
-
-                Thread.Sleep(500); // 0.5초 대기 후 재시도
+                Thread.Sleep(500);
             }
-
             _logManager.LogError($"[WaitForFileReady] Timeout waiting for file: {filePath}");
-            return false; // 타임아웃
+            return false;
         }
 
         private void OnTab1FileEvent(object sender, FileSystemEventArgs e)
         {
-            // 1. _#1_ 원본 파일 무시
-            if (e.Name.Contains("_#1_")) return;
+            if (e.Name.Contains("_#1_") || isPaused) return;
 
-            // [수정] Thread.Sleep(1000) 제거 및 Task.Run 내부에서 대기
             Task.Run(() =>
             {
                 try
                 {
-                    // 파일 안정화 대기 (최대 60초)
-                    // 장비 또는 Agent가 파일을 쓰는 동안 대기하여 Lock/접근 오류 방지
                     if (!WaitForFileReady(e.FullPath, 60))
                     {
                         _logManager.LogEvent($"[Tab1] File locked or copy failed (timeout), skipping: {e.Name}");
                         return;
                     }
 
-                    // 2. 메모리 관리 및 디바운스
                     string fileKey = e.FullPath.ToUpperInvariant();
                     DateTime now = DateTime.Now;
 
-                    // 메모리 청소
                     if (_lastProcessEventTime.Count > 2000)
                     {
                         lock (_cleanupLock)
@@ -477,11 +482,9 @@ namespace ITM_Agent.ucPanel
                         }
                     }
 
-                    // 디바운스
                     if (_lastProcessEventTime.TryGetValue(fileKey, out var lastTime) && (now - lastTime).TotalSeconds < DebounceSeconds) return;
                     _lastProcessEventTime[fileKey] = now;
 
-                    // 3. 규칙 매핑 (경로 정규화)
                     string folder = NormalizePath(Path.GetDirectoryName(e.FullPath));
                     if (!_tab1RuleMap.TryGetValue(folder, out string pluginName))
                     {
@@ -493,7 +496,6 @@ namespace ITM_Agent.ucPanel
                         }
                     }
 
-                    // 4. 실행
                     _logManager.LogEvent($"[Tab1] Triggered: {e.Name} ({e.ChangeType}) -> Plugin: {pluginName}");
                     RunPlugin(pluginName, e.FullPath);
                 }
@@ -506,14 +508,12 @@ namespace ITM_Agent.ucPanel
 
         private void OnTab2FileChanged(object sender, FileSystemEventArgs e)
         {
-            if (e.Name.Contains("_#1_")) return;
+            if (e.Name.Contains("_#1_") || isPaused) return;
 
-            // [수정] Thread.Sleep(200) 제거 및 Task.Run 내부에서 대기
             Task.Run(() =>
             {
                 try
                 {
-                    // 증분 감시의 경우 파일이 매우 빠르게 생성될 수 있으므로 대기 필수
                     if (!WaitForFileReady(e.FullPath, 60)) return;
 
                     string fileKey = e.FullPath.ToUpperInvariant();
@@ -696,8 +696,15 @@ namespace ITM_Agent.ucPanel
 
         public void LoadImageSaveFolder_PathChanged() { InitializeComboBoxColumns(); LoadSettings(); }
 
+        // [수정] UI 비활성화 제어 로직
         private void SetControlsEnabled(bool enabled)
         {
+            if (this.InvokeRequired)
+            {
+                this.Invoke(new Action(() => SetControlsEnabled(enabled)));
+                return;
+            }
+
             dgvCategorized.ReadOnly = !enabled;
             btnCatAdd.Enabled = enabled;
             btnCatRemove.Enabled = enabled;
