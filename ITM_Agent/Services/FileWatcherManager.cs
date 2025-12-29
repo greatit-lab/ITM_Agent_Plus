@@ -4,8 +4,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
-using System.Threading; // Timer 사용을 위해 추가
-using System.Threading.Tasks; // Task 사용 (필요한 경우)
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace ITM_Agent.Services
 {
@@ -14,46 +14,65 @@ namespace ITM_Agent.Services
         private SettingsManager settingsManager;
         private LogManager logManager;
         private readonly List<FileSystemWatcher> watchers = new List<FileSystemWatcher>();
-        private readonly Dictionary<string, DateTime> fileProcessTracker = new Dictionary<string, DateTime>(); // 중복 이벤트 방지용
-        private readonly TimeSpan duplicateEventThreshold = TimeSpan.FromSeconds(5); // 중복 이벤트 방지 시간
+        private readonly Dictionary<string, DateTime> fileProcessTracker = new Dictionary<string, DateTime>();
+        private readonly TimeSpan duplicateEventThreshold = TimeSpan.FromSeconds(5);
 
         private bool isRunning = false;
+        private bool isPaused = false; // [신규] 서버 끊김으로 인한 일시정지 상태
 
-        // 안정화 감지용 멤버 변수
+        // 안정화 감지용
         private readonly Dictionary<string, FileTrackingInfo> trackedFiles = new Dictionary<string, FileTrackingInfo>(StringComparer.OrdinalIgnoreCase);
         private System.Threading.Timer stabilityCheckTimer;
         private readonly object trackingLock = new object();
-        private const int StabilityCheckIntervalMs = 1000; // 1초 간격으로 안정성 검사
-        private const double FileStableThresholdSeconds = 5.0; // 마지막 변경 후 5초 동안 변화 없으면 안정화 간주
+        private const int StabilityCheckIntervalMs = 1000;
+        private const double FileStableThresholdSeconds = 5.0;
 
-        // 안정화 감지용 내부 클래스
         private class FileTrackingInfo
         {
             public DateTime LastEventTime { get; set; }
             public long LastSize { get; set; }
-            public DateTime LastWriteTime { get; set; } // UTC 시간으로 저장 권장
+            public DateTime LastWriteTime { get; set; }
             public WatcherChangeTypes LastChangeType { get; set; }
         }
 
-        // 버퍼 오버플로 복구 작업 동시 실행 방지용 잠금 객체
+        // 복구 작업 락
         private readonly object recoveryLock = new object();
-
-
-        // Debug Mode 상태 속성 (LogManager.GlobalDebugEnabled 사용으로 대체)
-        // public bool IsDebugMode { get; set; } = false;
 
         public FileWatcherManager(SettingsManager settingsManager, LogManager logManager, bool isDebugMode)
         {
             this.settingsManager = settingsManager;
             this.logManager = logManager;
-            LogManager.GlobalDebugEnabled = isDebugMode; // 전역 플래그 설정
+            LogManager.GlobalDebugEnabled = isDebugMode;
         }
 
-        // 외부(ucOptionPanel)에서 Debug 모드 변경 시 호출
         public void UpdateDebugMode(bool isDebug)
         {
-            LogManager.GlobalDebugEnabled = isDebug; // 전역 플래그 업데이트
+            LogManager.GlobalDebugEnabled = isDebug;
             logManager.LogEvent($"[FileWatcherManager] Debug mode updated to: {isDebug}");
+        }
+
+        // [신규] 서버 끊김 시 호출: 이벤트 발생을 원천 차단
+        public void PauseWatching()
+        {
+            if (!isRunning) return;
+            isPaused = true;
+            foreach (var w in watchers)
+            {
+                try { w.EnableRaisingEvents = false; } catch { }
+            }
+            logManager.LogEvent("[FileWatcherManager] Paused watching (Server Holding).");
+        }
+
+        // [신규] 서버 복구 시 호출: 이벤트 발생 재개
+        public void ResumeWatching()
+        {
+            if (!isRunning) return;
+            isPaused = false;
+            foreach (var w in watchers)
+            {
+                try { w.EnableRaisingEvents = true; } catch { }
+            }
+            logManager.LogEvent("[FileWatcherManager] Resumed watching.");
         }
 
         public void InitializeWatchers()
@@ -70,7 +89,7 @@ namespace ITM_Agent.Services
             {
                 if (!Directory.Exists(folder))
                 {
-                    logManager.LogEvent($"[FileWatcherManager] Folder does not exist: {folder}", LogManager.GlobalDebugEnabled); // 전역 플래그 사용
+                    logManager.LogEvent($"[FileWatcherManager] Folder does not exist: {folder}", LogManager.GlobalDebugEnabled);
                     continue;
                 }
 
@@ -85,62 +104,36 @@ namespace ITM_Agent.Services
 
                     watcher.Created += OnFileChanged;
                     watcher.Changed += OnFileChanged;
-                    // Deleted 이벤트 핸들러 연결 제거됨
                     watcher.Error += OnWatcherError;
 
                     watchers.Add(watcher);
 
-                    if (LogManager.GlobalDebugEnabled) // 전역 플래그 사용
-                    {
+                    if (LogManager.GlobalDebugEnabled)
                         logManager.LogDebug($"[FileWatcherManager] Initialized watcher for folder: {folder}");
-                    }
                 }
                 catch (Exception ex)
                 {
                     logManager.LogError($"[FileWatcherManager] Failed to create watcher for {folder}. Error: {ex.Message}");
                 }
             }
-
             logManager.LogEvent($"[FileWatcherManager] {watchers.Count} watcher(s) initialized.");
         }
 
         public void StartWatching()
         {
-            if (isRunning)
-            {
-                logManager.LogEvent("[FileWatcherManager] File monitoring is already running.");
-                return;
-            }
+            if (isRunning) return;
 
             InitializeWatchers();
-
-            if (watchers.Count == 0)
-            {
-                logManager.LogEvent("[FileWatcherManager] No watchers initialized. Monitoring cannot start.");
-                return;
-            }
+            if (watchers.Count == 0) return;
 
             foreach (var watcher in watchers)
             {
-                try
-                {
-                    watcher.EnableRaisingEvents = true;
-                }
-                catch (Exception ex)
-                {
-                    logManager.LogError($"[FileWatcherManager] Failed to enable watcher for {watcher.Path}. Error: {ex.Message}");
-                }
+                try { watcher.EnableRaisingEvents = true; } catch { }
             }
 
             isRunning = true;
+            isPaused = false;
             logManager.LogEvent("[FileWatcherManager] File monitoring started.");
-            if (LogManager.GlobalDebugEnabled) // 전역 플래그 사용
-            {
-                logManager.LogDebug(
-                    $"[FileWatcherManager] Monitoring {watchers.Count} folder(s): " +
-                    $"{string.Join(", ", watchers.Select(w => w.Path))}"
-                );
-            }
         }
 
         public void StopWatchers()
@@ -155,10 +148,7 @@ namespace ITM_Agent.Services
                     w.Error -= OnWatcherError;
                     w.Dispose();
                 }
-                catch (Exception ex)
-                {
-                    logManager.LogEvent($"[FileWatcherManager] Warning: Error disposing watcher for {w.Path}: {ex.Message}");
-                }
+                catch { }
             }
             watchers.Clear();
 
@@ -170,44 +160,22 @@ namespace ITM_Agent.Services
             }
 
             isRunning = false;
+            isPaused = false;
             logManager.LogEvent("[FileWatcherManager] File monitoring stopped.");
         }
 
         private void OnFileChanged(object sender, FileSystemEventArgs e)
         {
-            // ▼▼▼ 진입 확인용 Debug 로그 추가 ▼▼▼
-            if (LogManager.GlobalDebugEnabled)
-            {
-                // 이벤트 종류와 전체 경로를 기록
-                logManager.LogDebug($"[FileWatcherManager] OnFileChanged ENTERED: Type={e.ChangeType}, Path={e.FullPath}");
-            }
-            // ▲▲▲ 추가 끝 ▲▲▲
+            if (!isRunning || isPaused) return; // Paused 상태면 무시
 
-            // 1. 에이전트 실행 상태 확인
-            if (!isRunning)
-            {
-                if (LogManager.GlobalDebugEnabled) // 전역 플래그 사용
-                    logManager.LogDebug($"[FileWatcherManager] File event ignored (not running): {e.FullPath}");
-                return;
-            }
-
-            // 2. 제외 폴더 확인 (최우선)
             var excludeFolders = settingsManager.GetFoldersFromSection("[ExcludeFolders]");
             string changedFolderPath = null;
             try
             {
                 changedFolderPath = Path.GetDirectoryName(e.FullPath);
-                if (string.IsNullOrEmpty(changedFolderPath))
-                {
-                    logManager.LogEvent($"[FileWatcherManager] Warning: Could not get directory name for: {e.FullPath}. Skipping event.");
-                    return;
-                }
+                if (string.IsNullOrEmpty(changedFolderPath)) return;
             }
-            catch (Exception pathEx)
-            {
-                logManager.LogEvent($"[FileWatcherManager] Warning: Error getting directory for '{e.FullPath}': {pathEx.Message}. Skipping event.");
-                return;
-            }
+            catch { return; }
 
             foreach (var excludeFolder in excludeFolders)
             {
@@ -216,28 +184,16 @@ namespace ITM_Agent.Services
                     string normalizedExclude = Path.GetFullPath(excludeFolder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
                     string normalizedChanged = Path.GetFullPath(changedFolderPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
-                    // 제외 폴더 내 파일이면 아무 로그도 남기지 않고 즉시 종료
                     if (normalizedChanged.StartsWith(normalizedExclude, StringComparison.OrdinalIgnoreCase))
                     {
-                        return; // 여기서 바로 종료 (로그 없음)
+                        return;
                     }
                 }
-                catch (Exception pathEx)
-                {
-                    logManager.LogEvent($"[FileWatcherManager] Warning: Error processing exclude path '{excludeFolder}' or changed path '{changedFolderPath}': {pathEx.Message}. Skipping event.");
-                    return;
-                }
+                catch { return; }
             }
 
-            // 3. 중복 이벤트 확인 (제외 폴더가 아닌 경우만 실행)
-            if (IsDuplicateEvent(e.FullPath))
-            {
-                if (LogManager.GlobalDebugEnabled) // 전역 플래그 사용
-                    logManager.LogDebug($"[FileWatcherManager] Duplicate event ignored: {e.ChangeType} - {e.FullPath}");
-                return;
-            }
+            if (IsDuplicateEvent(e.FullPath)) return;
 
-            // --- 이하 안정화 추적 로직 ---
             try
             {
                 lock (trackingLock)
@@ -246,17 +202,12 @@ namespace ITM_Agent.Services
                     long currentSize = GetFileSizeSafe(e.FullPath);
                     DateTime currentWriteTime = GetLastWriteTimeSafe(e.FullPath);
 
-                    if (currentSize == 0 && e.ChangeType == WatcherChangeTypes.Changed)
-                    {
-                        if (LogManager.GlobalDebugEnabled) logManager.LogDebug($"[FileWatcherManager] Ignoring zero-byte Changed event: {e.FullPath}");
-                        return;
-                    }
+                    if (currentSize == 0 && e.ChangeType == WatcherChangeTypes.Changed) return;
 
                     if (!trackedFiles.TryGetValue(e.FullPath, out FileTrackingInfo info))
                     {
                         info = new FileTrackingInfo();
                         trackedFiles[e.FullPath] = info;
-                        if (LogManager.GlobalDebugEnabled) logManager.LogDebug($"[FileWatcherManager] Start tracking: {e.FullPath}");
                     }
 
                     info.LastEventTime = now;
@@ -267,7 +218,6 @@ namespace ITM_Agent.Services
                     if (stabilityCheckTimer == null)
                     {
                         stabilityCheckTimer = new Timer(CheckFileStability, null, StabilityCheckIntervalMs, StabilityCheckIntervalMs);
-                        if (LogManager.GlobalDebugEnabled) logManager.LogDebug("[FileWatcherManager] Stability check timer started.");
                     }
                     else
                     {
@@ -277,64 +227,14 @@ namespace ITM_Agent.Services
             }
             catch (Exception ex)
             {
-                logManager.LogEvent($"[FileWatcherManager] Error in OnFileChanged for {e.FullPath}: {ex.Message}");
-                if (LogManager.GlobalDebugEnabled) logManager.LogDebug($"[FileWatcherManager] OnFileChanged Exception details: {ex.StackTrace}");
+                logManager.LogError($"[FileWatcherManager] OnFileChanged Error: {ex.Message}");
             }
         }
 
-        // 파일 읽기 권한 확인 헬퍼
-        private bool CanReadFile(string filePath)
-        {
-            try
-            {
-                if (!File.Exists(filePath)) return false;
-                using (FileStream fs = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-                {
-                    return true;
-                }
-            }
-            catch (FileNotFoundException) { return false; }
-            catch (IOException) { return false; }
-            catch (UnauthorizedAccessException)
-            {
-                logManager.LogEvent($"[FileWatcherManager] Warning: No read permission for file: {filePath}");
-                return false;
-            }
-            catch (Exception ex)
-            {
-                logManager.LogEvent($"[FileWatcherManager] Warning: Error checking read access for {filePath}: {ex.Message}");
-                return false;
-            }
-        }
-
-
-        // 안전하게 파일 크기 얻는 헬퍼
-        private long GetFileSizeSafe(string filePath)
-        {
-            try { return File.Exists(filePath) ? new FileInfo(filePath).Length : -1; }
-            catch (FileNotFoundException) { return -1; }
-            catch (Exception ex)
-            {
-                if (LogManager.GlobalDebugEnabled) logManager.LogDebug($"[FileWatcherManager] Error getting size for {filePath}: {ex.Message}");
-                return -1;
-            }
-        }
-
-        // 안전하게 마지막 수정 시간(UTC) 얻는 헬퍼
-        private DateTime GetLastWriteTimeSafe(string filePath)
-        {
-            try { return File.Exists(filePath) ? File.GetLastWriteTimeUtc(filePath) : DateTime.MinValue; }
-            catch (FileNotFoundException) { return DateTime.MinValue; }
-            catch (Exception ex)
-            {
-                if (LogManager.GlobalDebugEnabled) logManager.LogDebug($"[FileWatcherManager] Error getting write time for {filePath}: {ex.Message}");
-                return DateTime.MinValue;
-            }
-        }
-
-        // CheckFileStability 메서드
         private void CheckFileStability(object state)
         {
+            if (isPaused) return;
+
             try
             {
                 DateTime now = DateTime.UtcNow;
@@ -345,7 +245,6 @@ namespace ITM_Agent.Services
                     if (!isRunning || trackedFiles.Count == 0)
                     {
                         stabilityCheckTimer?.Change(Timeout.Infinite, Timeout.Infinite);
-                        if (LogManager.GlobalDebugEnabled && isRunning) logManager.LogDebug("[FileWatcherManager] No files to track. Stability check timer paused.");
                         return;
                     }
 
@@ -362,7 +261,6 @@ namespace ITM_Agent.Services
                         if (currentSize == -1 || currentWriteTime == DateTime.MinValue)
                         {
                             trackedFiles.Remove(filePath);
-                            if (LogManager.GlobalDebugEnabled) logManager.LogDebug($"[FileWatcherManager] Stop tracking (file not accessible or deleted during stability check): {filePath}");
                             continue;
                         }
 
@@ -371,7 +269,6 @@ namespace ITM_Agent.Services
                             info.LastEventTime = now;
                             info.LastSize = currentSize;
                             info.LastWriteTime = currentWriteTime;
-                            if (LogManager.GlobalDebugEnabled) logManager.LogDebug($"[FileWatcherManager] File changed, resetting stability timer for: {filePath}");
                             continue;
                         }
 
@@ -383,11 +280,6 @@ namespace ITM_Agent.Services
                             {
                                 stableFilesToProcess.Add(filePath);
                                 trackedFiles.Remove(filePath);
-                                if (LogManager.GlobalDebugEnabled) logManager.LogDebug($"[FileWatcherManager] File stable and ready for processing: {filePath}");
-                            }
-                            else
-                            {
-                                if (LogManager.GlobalDebugEnabled) logManager.LogDebug($"[FileWatcherManager] File stable but locked, retrying next check: {filePath}");
                             }
                         }
                     }
@@ -395,13 +287,12 @@ namespace ITM_Agent.Services
                     if (trackedFiles.Count == 0)
                     {
                         stabilityCheckTimer?.Change(Timeout.Infinite, Timeout.Infinite);
-                        if (LogManager.GlobalDebugEnabled) logManager.LogDebug("[FileWatcherManager] Tracking list empty. Stability check timer paused.");
                     }
                     else
                     {
                         stabilityCheckTimer?.Change(StabilityCheckIntervalMs, StabilityCheckIntervalMs);
                     }
-                } // lock 끝
+                }
 
                 foreach (string stableFilePath in stableFilesToProcess)
                 {
@@ -409,23 +300,116 @@ namespace ITM_Agent.Services
                     catch (Exception ex)
                     {
                         logManager.LogError($"[FileWatcherManager] Error processing stable file {stableFilePath}: {ex.Message}");
-                        if (LogManager.GlobalDebugEnabled) logManager.LogDebug($"[FileWatcherManager] ProcessFile Exception details: {ex.StackTrace}");
                     }
                 }
             }
             catch (Exception ex)
             {
-                logManager.LogError($"[FileWatcherManager] Unhandled exception in CheckFileStability timer callback: {ex.Message}");
-                if (LogManager.GlobalDebugEnabled) logManager.LogDebug($"[FileWatcherManager] CheckFileStability Exception details: {ex.StackTrace}");
+                logManager.LogError($"[FileWatcherManager] CheckFileStability Error: {ex.Message}");
                 try { stabilityCheckTimer?.Change(Timeout.Infinite, Timeout.Infinite); } catch { }
             }
         }
 
-        // ProcessFile 메서드
+        // [신규/개선] 복구 스캔 (Slow Recovery Mode)
+        public void StartRecoveryScan()
+        {
+            if (!Monitor.TryEnter(recoveryLock)) return; // 이미 실행 중이면 스킵
+
+            Task.Run(() =>
+            {
+                try
+                {
+                    // ★ 스레드 우선순위 낮춤 (장비 부하 최소화)
+                    Thread.CurrentThread.Priority = ThreadPriority.Lowest;
+
+                    logManager.LogEvent("[Recovery] Starting Slow Recovery Scan...");
+
+                    var targetFolders = settingsManager.GetFoldersFromSection("[TargetFolders]");
+                    int totalProcessed = 0;
+
+                    // 제외 폴더 목록 준비
+                    var excludeFolders = settingsManager.GetFoldersFromSection("[ExcludeFolders]")
+                        .Select(p =>
+                        {
+                            try { return Path.GetFullPath(p).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar); }
+                            catch { return null; }
+                        })
+                        .Where(p => p != null)
+                        .ToList();
+
+                    foreach (var folder in targetFolders)
+                    {
+                        if (!Directory.Exists(folder) || isPaused) continue;
+
+                        // 하위 폴더까지 검색
+                        foreach (string filePath in Directory.EnumerateFiles(folder, "*.*", SearchOption.AllDirectories))
+                        {
+                            if (isPaused) break; // 실행 중 서버 끊기면 즉시 중단
+
+                            // 제외 폴더 체크
+                            try
+                            {
+                                string currentFileDir = Path.GetDirectoryName(filePath);
+                                if (string.IsNullOrEmpty(currentFileDir)) continue;
+                                string normalizedCurrentDir = Path.GetFullPath(currentFileDir)
+                                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+                                if (excludeFolders.Any(ex => normalizedCurrentDir.StartsWith(ex, StringComparison.OrdinalIgnoreCase)))
+                                    continue;
+                            }
+                            catch { continue; }
+
+                            // 중복 체크
+                            if (IsDuplicateEvent(filePath)) continue;
+
+                            // 파일 처리 시도 (IsFileReady 체크 포함)
+                            if (IsFileReady(filePath))
+                            {
+                                try
+                                {
+                                    string result = ProcessFile(filePath);
+                                    if (result != null)
+                                    {
+                                        totalProcessed++;
+                                        // ★ Throttling: 파일 하나당 200ms 휴식
+                                        Thread.Sleep(200);
+
+                                        // 처리된 파일 기록
+                                        lock (fileProcessTracker)
+                                        {
+                                            fileProcessTracker[filePath] = DateTime.UtcNow;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // 실패했거나 대상 아님 -> 약간의 텀 (CPU 양보)
+                                        Thread.Sleep(10);
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    logManager.LogError($"[Recovery] Error processing file '{filePath}': {ex.Message}");
+                                }
+                            }
+                        }
+                    }
+                    logManager.LogEvent($"[Recovery] Scan completed. Processed: {totalProcessed} files.");
+                }
+                catch (Exception ex)
+                {
+                    logManager.LogError($"[Recovery] Scan failed: {ex.Message}");
+                }
+                finally
+                {
+                    Monitor.Exit(recoveryLock);
+                }
+            });
+        }
+
         private string ProcessFile(string filePath)
         {
             string fileName;
-            try { fileName = Path.GetFileName(filePath); if (string.IsNullOrEmpty(fileName)) { logManager.LogEvent($"[FileWatcherManager] Warning: Invalid file path (empty filename): {filePath}"); return null; } } catch (ArgumentException ex) { logManager.LogEvent($"[FileWatcherManager] Warning: Invalid file path characters: {filePath}. Error: {ex.Message}"); return null; }
+            try { fileName = Path.GetFileName(filePath); if (string.IsNullOrEmpty(fileName)) return null; } catch { return null; }
 
             var regexList = settingsManager.GetRegexList();
 
@@ -441,83 +425,58 @@ namespace ITM_Agent.Services
                         {
                             Directory.CreateDirectory(destinationFolder);
 
-                            // [핵심 수정] File.Copy 대신 공유 위반 방지 헬퍼 메서드 사용
                             if (!CopyFileWithSharedRead(filePath, destinationFile, true))
                             {
-                                // 헬퍼 메서드 내부에서 이미 로그를 기록했으므로 여기서는 반환만 함
                                 return null;
                             }
 
-                            logManager.LogEvent($"[FileWatcherManager] File Copied (after stabilization): {fileName} -> {destinationFolder}");
+                            logManager.LogEvent($"[FileWatcherManager] File Copied: {fileName} -> {destinationFolder}");
                             return destinationFolder;
                         }
-                        catch (FileNotFoundException) { logManager.LogEvent($"[FileWatcherManager] Copy skipped: Source file not found: {fileName}"); return null; }
-                        catch (IOException ioEx) { logManager.LogError($"[FileWatcherManager] IO Error copying file {fileName} to {destinationFolder}: {ioEx.Message}"); }
-                        catch (UnauthorizedAccessException uaEx) { logManager.LogError($"[FileWatcherManager] Access Denied copying file {fileName} to {destinationFolder}: {uaEx.Message}"); }
-                        catch (Exception ex) { logManager.LogError($"[FileWatcherManager] Error copying file {fileName}: {ex.Message}"); if (LogManager.GlobalDebugEnabled) logManager.LogDebug($"[FileWatcherManager] Copy Exception details: {ex.StackTrace}"); }
-                        return null; // 복사 실패 시 null 반환
+                        catch (Exception ex) { logManager.LogError($"[FileWatcherManager] Error copying file {fileName}: {ex.Message}"); }
+                        return null;
                     }
                 }
-                catch (RegexMatchTimeoutException rtEx) { logManager.LogEvent($"[FileWatcherManager] Warning: Regex timeout for pattern '{kvp.Key}' on file '{fileName}': {rtEx.Message}"); }
-                catch (ArgumentException argEx) { logManager.LogError($"[FileWatcherManager] Invalid Regex pattern '{kvp.Key}': {argEx.Message}"); }
-            }
-
-            if (LogManager.GlobalDebugEnabled)
-            {
-                logManager.LogDebug($"[FileWatcherManager] No matching regex for file: {fileName}");
+                catch { }
             }
             return null;
         }
 
-        // ▼▼▼ [추가] 공유 위반 방지 복사 헬퍼 메서드 ▼▼▼
-        /// <summary>
-        /// 원본 파일을 FileShare.ReadWrite 모드로 열어 복사 (장비의 쓰기 방해 방지)
-        /// </summary>
         private bool CopyFileWithSharedRead(string sourcePath, string destPath, bool overwrite)
         {
             int maxRetries = 5;
-            int delayMs = 300; // 재시도 간 300ms 대기
+            int delayMs = 300;
 
             for (int i = 0; i < maxRetries; i++)
             {
                 try
                 {
-                    // ★ FileShare.ReadWrite: 원본 파일을 읽는 동안 다른 프로세스(장비)가 쓸 수 있도록 허용
                     using (var sourceStream = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                     {
-                        // [수정] 대상 파일(destStream)을 쓰는(Write) 동안, 다른 프로세스가 읽고 쓸 수 있도록(FileShare.ReadWrite) 명시적으로 허용합니다.
                         using (var destStream = new FileStream(destPath, overwrite ? FileMode.Create : FileMode.CreateNew, FileAccess.Write, FileShare.ReadWrite))
                         {
                             sourceStream.CopyTo(destStream);
                         }
                     }
-                    return true; // 복사 성공
+                    return true;
                 }
                 catch (FileNotFoundException)
                 {
-                    logManager.LogEvent($"[FileWatcherManager] Copy failed, source file not found: {sourcePath}");
-                    return false; // 원본 파일이 없음
+                    return false;
                 }
-                catch (IOException ioEx) when (i < maxRetries - 1)
+                catch (IOException) when (i < maxRetries - 1)
                 {
-                    // 대상 파일이 잠겼거나, 드물게 원본 파일이 잠긴 경우
-                    logManager.LogDebug($"[FileWatcherManager] IO error during copy (retrying {i + 1}/{maxRetries}): {ioEx.Message}");
                     Thread.Sleep(delayMs);
                 }
-                catch (Exception ex)
+                catch
                 {
-                    // 그 외 예외 (e.g., UnauthorizedAccess)
-                    logManager.LogError($"[FileWatcherManager] Failed to copy file {sourcePath} to {destPath}: {ex.Message}");
                     return false;
                 }
             }
-
-            // 모든 재시도 실패 (IOException)
-            logManager.LogError($"[FileWatcherManager] Copy failed after retries (file likely locked): {sourcePath}");
+            logManager.LogError($"[FileWatcherManager] Copy failed after retries: {sourcePath}");
             return false;
         }
 
-        // IsDuplicateEvent 메서드
         private bool IsDuplicateEvent(string filePath)
         {
             DateTime now = DateTime.UtcNow;
@@ -530,7 +489,6 @@ namespace ITM_Agent.Services
                         .Select(kvp => kvp.Key)
                         .ToList();
                     foreach (var key in keysToRemove) fileProcessTracker.Remove(key);
-                    if (LogManager.GlobalDebugEnabled && keysToRemove.Count > 0) logManager.LogDebug($"[FileWatcherManager] Cleaned {keysToRemove.Count} old entries from duplicate event tracker.");
                 }
                 if (fileProcessTracker.TryGetValue(filePath, out var lastProcessed))
                 {
@@ -541,8 +499,6 @@ namespace ITM_Agent.Services
             }
         }
 
-
-        // IsFileReady 메서드
         private bool IsFileReady(string filePath)
         {
             if (!File.Exists(filePath)) return false;
@@ -553,211 +509,41 @@ namespace ITM_Agent.Services
                     return true;
                 }
             }
-            catch (FileNotFoundException) { return false; }
-            catch (IOException ioEx)
-            {
-                if (LogManager.GlobalDebugEnabled) logManager.LogDebug($"[FileWatcherManager] IsFileReady IO Exception for {filePath}: {ioEx.Message}");
-                return false;
-            }
-            catch (UnauthorizedAccessException)
-            {
-                logManager.LogEvent($"[FileWatcherManager] Warning: Access denied while checking if file is ready: {filePath}");
-                return false;
-            }
-            catch (Exception ex)
-            {
-                logManager.LogEvent($"[FileWatcherManager] Warning: Unexpected error checking if file is ready ({filePath}): {ex.Message}");
-                return false;
-            }
+            catch { return false; }
         }
 
+        private long GetFileSizeSafe(string filePath)
+        {
+            try { return File.Exists(filePath) ? new FileInfo(filePath).Length : -1; }
+            catch { return -1; }
+        }
 
-        // OnWatcherError 메서드 (버퍼 오버플로 복구 로직 포함)
+        private DateTime GetLastWriteTimeSafe(string filePath)
+        {
+            try { return File.Exists(filePath) ? File.GetLastWriteTimeUtc(filePath) : DateTime.MinValue; }
+            catch { return DateTime.MinValue; }
+        }
+
         private void OnWatcherError(object sender, ErrorEventArgs e)
         {
             Exception ex = e.GetException();
             string errorMessage = ex?.Message ?? "Unknown watcher error";
             logManager.LogError($"[FileWatcherManager] Watcher error: {errorMessage}");
-            if (ex != null && LogManager.GlobalDebugEnabled)
-            {
-                logManager.LogDebug($"[FileWatcherManager] Watcher exception details: {ex.StackTrace}");
-            }
 
-            if (ex is InternalBufferOverflowException bufferEx)
+            if (ex is InternalBufferOverflowException)
             {
                 FileSystemWatcher watcher = sender as FileSystemWatcher;
                 if (watcher != null)
                 {
-                    if (Monitor.TryEnter(recoveryLock))
-                    {
-                        try
-                        {
-                            logManager.LogEvent($"[FileWatcherManager] Buffer overflow detected for watcher on '{watcher.Path}'. Initiating recovery process...");
-                            watcher.EnableRaisingEvents = false;
-                            logManager.LogEvent($"[FileWatcherManager] Watcher temporarily disabled for '{watcher.Path}'.");
-                            Thread.Sleep(10000);
-                            logManager.LogEvent($"[FileWatcherManager] Manually scanning folder '{watcher.Path}' for missed changes...");
-                            ManuallyScanAndProcessFolder(watcher.Path);
-                            logManager.LogEvent($"[FileWatcherManager] Manual scan completed for '{watcher.Path}'.");
-                            try
-                            {
-                                if (watchers.Contains(watcher))
-                                {
-                                    watcher.EnableRaisingEvents = true;
-                                    logManager.LogEvent($"[FileWatcherManager] Watcher re-enabled for '{watcher.Path}'.");
-                                }
-                                else
-                                {
-                                    logManager.LogEvent($"[FileWatcherManager] Watcher for '{watcher.Path}' removed during recovery. Skipping re-enable.");
-                                }
-                            }
-                            catch (ObjectDisposedException) { logManager.LogEvent($"[FileWatcherManager] Watcher for '{watcher.Path}' was disposed. Cannot re-enable."); }
-                            catch (Exception restartEx) { logManager.LogError($"[FileWatcherManager] Failed to re-enable watcher for '{watcher.Path}'. Error: {restartEx.Message}"); }
-                        }
-                        catch (Exception recoveryEx)
-                        {
-                            logManager.LogError($"[FileWatcherManager] Error during buffer overflow recovery for '{watcher.Path}': {recoveryEx.Message}");
-                            try { if (watchers.Contains(watcher) && !watcher.EnableRaisingEvents) { watcher.EnableRaisingEvents = true; logManager.LogEvent($"[FileWatcherManager] Attempting to re-enable watcher for '{watcher.Path}' after recovery failure."); } } catch { /* Ignore */ }
-                        }
-                        finally { Monitor.Exit(recoveryLock); }
-                    }
-                    else { logManager.LogEvent($"[FileWatcherManager] Recovery process already in progress for watcher on '{watcher.Path}'. Skipping."); }
+                    logManager.LogEvent($"[FileWatcherManager] Buffer overflow on '{watcher.Path}'. Scheduling recovery scan.");
+                    StartRecoveryScan();
                 }
-                else { logManager.LogError("[FileWatcherManager] Buffer overflow occurred, but could not identify the watcher instance."); }
             }
         }
 
-
-        // ManuallyScanAndProcessFolder 메서드
         private void ManuallyScanAndProcessFolder(string folderPath)
         {
-            try
-            {
-                if (!Directory.Exists(folderPath))
-                {
-                    logManager.LogEvent($"[FileWatcherManager] Manual scan skipped: Folder '{folderPath}' no longer exists.");
-                    return;
-                }
-
-                var excludeFolders = settingsManager.GetFoldersFromSection("[ExcludeFolders]")
-                    .Select(p =>
-                    {
-                        try
-                        {
-                            return Path.GetFullPath(p).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                        }
-                        catch
-                        {
-                            logManager.LogEvent($"[FileWatcherManager] Manual scan: Invalid exclude path '{p}'.");
-                            return null;
-                        }
-                    })
-                    .Where(p => p != null)
-                    .ToList();
-
-                logManager.LogEvent($"[FileWatcherManager] Starting manual scan for: {folderPath}");
-
-                int scannedFileCount = 0;
-                int processedFileCount = 0;
-
-                try
-                {
-                    Directory.EnumerateDirectories(folderPath, "*", SearchOption.TopDirectoryOnly).FirstOrDefault();
-                }
-                catch (UnauthorizedAccessException uaEx)
-                {
-                    logManager.LogError($"[FileWatcherManager] Manual scan: Access denied for top-level folder '{folderPath}'. Cannot scan. Error: {uaEx.Message}");
-                    return;
-                }
-
-                foreach (string filePath in Directory.EnumerateFiles(folderPath, "*.*", SearchOption.AllDirectories))
-                {
-                    scannedFileCount++;
-
-                    try
-                    {
-                        string currentFileDir = Path.GetDirectoryName(filePath);
-                        if (string.IsNullOrEmpty(currentFileDir))
-                            continue;
-
-                        string normalizedCurrentDir = Path.GetFullPath(currentFileDir)
-                            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-                        bool isExcluded = false;
-                        foreach (string excludePath in excludeFolders)
-                        {
-                            if (normalizedCurrentDir.StartsWith(excludePath, StringComparison.OrdinalIgnoreCase))
-                            {
-                                isExcluded = true;
-                                break;
-                            }
-                        }
-
-                        if (isExcluded)
-                            continue;
-                    }
-                    catch (PathTooLongException ptle)
-                    {
-                        logManager.LogEvent($"[FileWatcherManager] Manual scan: Path too long '{filePath}'. Skipping. Error: {ptle.Message}");
-                        continue;
-                    }
-                    catch (Exception pathEx)
-                    {
-                        logManager.LogEvent($"[FileWatcherManager] Manual scan: Error processing path for '{filePath}': {pathEx.Message}. Skipping.");
-                        continue;
-                    }
-
-                    bool recentlyProcessed = false;
-                    lock (fileProcessTracker)
-                    {
-                        if (fileProcessTracker.TryGetValue(filePath, out var lastProcessed) &&
-                            (DateTime.UtcNow - lastProcessed).TotalMinutes < 5)
-                        {
-                            recentlyProcessed = true;
-                        }
-                    }
-
-                    bool currentlyTracked = false;
-                    lock (trackingLock)
-                    {
-                        currentlyTracked = trackedFiles.ContainsKey(filePath);
-                    }
-
-                    if (recentlyProcessed || currentlyTracked)
-                        continue; // 로그 제거됨
-
-                    if (IsFileReady(filePath))
-                    {
-                        try
-                        {
-                            string result = ProcessFile(filePath);
-                            if (result != null)
-                            {
-                                processedFileCount++;
-                                lock (fileProcessTracker)
-                                {
-                                    fileProcessTracker[filePath] = DateTime.UtcNow;
-                                }
-                            }
-                        }
-                        catch (Exception processEx)
-                        {
-                            logManager.LogError($"[FileWatcherManager] Manual scan: Error processing file '{filePath}': {processEx.Message}");
-                        }
-                    }
-                    // 잠긴 파일 로그 제거됨
-                }
-
-                logManager.LogEvent($"[FileWatcherManager] Manual scan finished for: {folderPath}. Scanned: {scannedFileCount}, Processed: {processedFileCount}.");
-            }
-            catch (UnauthorizedAccessException uaEx)
-            {
-                logManager.LogError($"[FileWatcherManager] Manual scan: Access denied during scan of '{folderPath}'. Error: {uaEx.Message}");
-            }
-            catch (Exception ex)
-            {
-                logManager.LogError($"[FileWatcherManager] Error during manual scan of folder '{folderPath}': {ex.Message}");
-            }
+            // 이 메서드는 이제 StartRecoveryScan으로 대체됩니다.
         }
-    } // Class End
-} // Namespace End
+    }
+}
