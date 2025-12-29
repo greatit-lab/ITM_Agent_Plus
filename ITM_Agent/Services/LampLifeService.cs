@@ -358,11 +358,11 @@ namespace ITM_Agent.Services
             if (string.IsNullOrEmpty(instanceName))
             {
                 // 발견 못했으면 기본값 시도
-                instanceName = "SQLEXPRESS"; 
+                instanceName = "SQLEXPRESS";
             }
 
             string dataSource = $"{hostName}\\{instanceName}";
-            
+
             // Windows 통합 인증 사용
             return $"Data Source={dataSource};Initial Catalog=N2000_MEASURE;Integrated Security=True;TrustServerCertificate=True;";
         }
