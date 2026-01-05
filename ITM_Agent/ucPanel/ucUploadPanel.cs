@@ -42,6 +42,18 @@ namespace ITM_Agent.ucPanel
         private readonly Dictionary<string, (string Task, string Filter, bool RequiresOverride)> _pluginMetadataCache =
             new Dictionary<string, (string Task, string Filter, bool RequiresOverride)>(StringComparer.OrdinalIgnoreCase);
 
+        // [수정] 플러그인 런타임 캐시 추가 (메모리 누수 방지용)
+        // Key: PluginName, Value: (Loaded Assembly Type, MethodInfo)
+        private readonly ConcurrentDictionary<string, PluginRuntimeInfo> _pluginRuntimeCache = 
+            new ConcurrentDictionary<string, PluginRuntimeInfo>(StringComparer.OrdinalIgnoreCase);
+
+        private class PluginRuntimeInfo
+        {
+            public Type ClassType { get; set; }
+            public MethodInfo Method { get; set; }
+            public bool RequiresThreeArgs { get; set; } // ProcessAndUpload(path, ini, object) vs (path, ini) vs (path)
+        }
+
         private const string Tab1Section = "[UploadRulesTab1]";
         private const string Tab2Section = "[UploadRulesTab2]";
 
@@ -555,41 +567,101 @@ namespace ITM_Agent.ucPanel
             });
         }
 
+        // [수정] RunPlugin 메서드 전체 개선 (캐싱 적용으로 메모리 누수 해결)
         private void RunPlugin(string pluginName, string filePath)
         {
             try
             {
-                var pluginItem = _pluginPanel.GetLoadedPlugins().FirstOrDefault(p => p.PluginName.Equals(pluginName, StringComparison.OrdinalIgnoreCase));
-                if (pluginItem == null || !File.Exists(pluginItem.AssemblyPath)) { _logManager.LogError($"[ucUploadPanel] Plugin DLL not found: {pluginName}"); return; }
-
-                byte[] dllBytes = File.ReadAllBytes(pluginItem.AssemblyPath);
-                Assembly asm = Assembly.Load(dllBytes);
-                Type targetType = asm.GetTypes().FirstOrDefault(t => t.IsClass && !t.IsAbstract && t.GetMethods().Any(m => m.Name == "ProcessAndUpload"));
-                if (targetType == null) { _logManager.LogError($"[ucUploadPanel] Invalid plugin class: {pluginName}"); return; }
-
-                object pluginObj = Activator.CreateInstance(targetType);
-                MethodInfo mi = targetType.GetMethod("ProcessAndUpload", new[] { typeof(string), typeof(object), typeof(object) });
-                object[] args = null;
-
-                if (mi != null) args = new object[] { filePath, Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Settings.ini"), null };
-                else
+                // 1. 캐시에서 먼저 조회
+                if (!_pluginRuntimeCache.TryGetValue(pluginName, out PluginRuntimeInfo runtimeInfo))
                 {
-                    mi = targetType.GetMethod("ProcessAndUpload", new[] { typeof(string), typeof(string) });
-                    if (mi != null) args = new object[] { filePath, Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Settings.ini") };
-                    else
+                    // 2. 캐시 미스 시 로딩 절차 수행 (최초 1회만 실행됨)
+                    var pluginItem = _pluginPanel.GetLoadedPlugins().FirstOrDefault(p => p.PluginName.Equals(pluginName, StringComparison.OrdinalIgnoreCase));
+                    if (pluginItem == null || !File.Exists(pluginItem.AssemblyPath))
                     {
-                        mi = targetType.GetMethod("ProcessAndUpload", new[] { typeof(string) });
-                        if (mi != null) args = new object[] { filePath };
+                        _logManager.LogError($"[ucUploadPanel] Plugin DLL not found: {pluginName}");
+                        return;
+                    }
+
+                    try
+                    {
+                        byte[] dllBytes = File.ReadAllBytes(pluginItem.AssemblyPath);
+                        Assembly asm = Assembly.Load(dllBytes); // 최초 1회 로드
+
+                        Type targetType = asm.GetTypes().FirstOrDefault(t => t.IsClass && !t.IsAbstract && t.GetMethods().Any(m => m.Name == "ProcessAndUpload"));
+                        if (targetType == null)
+                        {
+                            _logManager.LogError($"[ucUploadPanel] Invalid plugin class: {pluginName}");
+                            return;
+                        }
+
+                        // 메서드 시그니처 확인 (ProcessAndUpload)
+                        MethodInfo mi = targetType.GetMethod("ProcessAndUpload", new[] { typeof(string), typeof(object), typeof(object) });
+                        bool requiresThreeArgs = true;
+
+                        if (mi == null)
+                        {
+                            mi = targetType.GetMethod("ProcessAndUpload", new[] { typeof(string), typeof(string) });
+                            requiresThreeArgs = false;
+                            
+                            if (mi == null)
+                            {
+                                mi = targetType.GetMethod("ProcessAndUpload", new[] { typeof(string) });
+                            }
+                        }
+
+                        if (mi == null)
+                        {
+                            _logManager.LogError($"[ucUploadPanel] ProcessAndUpload method not found in {pluginName}");
+                            return;
+                        }
+
+                        // 런타임 정보 캐시에 저장
+                        runtimeInfo = new PluginRuntimeInfo
+                        {
+                            ClassType = targetType,
+                            Method = mi,
+                            RequiresThreeArgs = requiresThreeArgs
+                        };
+                        
+                        _pluginRuntimeCache.TryAdd(pluginName, runtimeInfo);
+                        _logManager.LogEvent($"[ucUploadPanel] Plugin loaded and cached: {pluginName}");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logManager.LogError($"[ucUploadPanel] Error loading plugin assembly {pluginName}: {ex.Message}");
+                        return;
                     }
                 }
 
-                if (mi != null)
+                // 3. 캐시된 정보로 실행 (Activator로 인스턴스만 생성 - 가벼움)
+                if (runtimeInfo != null && runtimeInfo.Method != null)
                 {
+                    object pluginObj = Activator.CreateInstance(runtimeInfo.ClassType);
+                    
+                    object[] args;
+                    var parameters = runtimeInfo.Method.GetParameters();
+
+                    // 파라미터 개수에 따른 아규먼트 구성
+                    if (parameters.Length == 3)
+                    {
+                        args = new object[] { filePath, Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Settings.ini"), null };
+                    }
+                    else if (parameters.Length == 2)
+                    {
+                        args = new object[] { filePath, Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Settings.ini") };
+                    }
+                    else
+                    {
+                        args = new object[] { filePath };
+                    }
+
+                    // 실행
                     Task.Run(() =>
                     {
                         try
                         {
-                            mi.Invoke(pluginObj, args);
+                            runtimeInfo.Method.Invoke(pluginObj, args);
                             _logManager.LogEvent($"[ucUploadPanel] Plugin execution completed: {pluginName}");
                         }
                         catch (Exception ex)
@@ -672,12 +744,23 @@ namespace ITM_Agent.ucPanel
             }
         }
 
-        private void OnPluginsChanged(object sender, EventArgs e) { InitializeComboBoxColumns(); RefreshPluginMetadataCache(); }
+        // [수정] 플러그인 변경 시 캐시 초기화 (업데이트 반영)
+        private void OnPluginsChanged(object sender, EventArgs e) 
+        { 
+            InitializeComboBoxColumns(); 
+            RefreshPluginMetadataCache();
+            
+            // 캐시 초기화하여 변경된 DLL을 다시 로드할 수 있게 함
+            _pluginRuntimeCache.Clear();
+            _logManager.LogEvent("[ucUploadPanel] Plugins changed - Cache cleared.");
+        }
 
         private (string Task, string Filter, bool RequiresOverride) LoadPluginMetadata(string dllPath)
         {
             try
             {
+                // 메타데이터 로드는 ReflectionOnlyLoad 등을 사용할 수 없으므로 부득이하게 로드하지만,
+                // 빈번하지 않으므로 허용. 실제 실행 시의 누수를 막는 것이 핵심.
                 byte[] bytes = File.ReadAllBytes(dllPath);
                 Assembly asm = Assembly.Load(bytes);
                 var type = asm.GetTypes().FirstOrDefault(t => t.IsClass && !t.IsAbstract && t.GetMethods().Any(m => m.Name == "ProcessAndUpload"));
