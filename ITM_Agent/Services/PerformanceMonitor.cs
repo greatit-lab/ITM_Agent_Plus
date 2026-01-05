@@ -2,7 +2,7 @@
 using LibreHardwareMonitor.Hardware;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics; // Process 클래스 사용을 위해 추가
+using System.Diagnostics; 
 using System.IO;
 using System.Linq;
 using System.Security.Principal;
@@ -405,20 +405,33 @@ namespace ITM_Agent.Services
                 }
                 _consecutiveFailures = 0;
 
-                // --- Top 5 프로세스 정보 수집 (이전과 동일) ---
+                // --- Top 5 프로세스 정보 수집 (메모리/핸들 누수 방지 수정) ---
                 var topProcesses = new List<ProcessMetric>();
                 try
                 {
-                    topProcesses = Process.GetProcesses()
-                        .OrderByDescending(p => p.PrivateMemorySize64)
-                        .Take(5)
-                        .Select(p => {
-                            long privateMemoryMB = p.PrivateMemorySize64 / (1024 * 1024);
-                            long workingSetMB = p.WorkingSet64 / (1024 * 1024);
-                            long sharedMemoryMB = workingSetMB > privateMemoryMB ? workingSetMB - privateMemoryMB : 0;
-                            return new ProcessMetric { ProcessName = p.ProcessName, MemoryUsageMB = privateMemoryMB, SharedMemoryUsageMB = sharedMemoryMB };
-                        })
-                        .ToList();
+                    // [수정] Process.GetProcesses() 반환 객체는 반드시 Dispose 해야 함
+                    Process[] allProcesses = Process.GetProcesses();
+                    try
+                    {
+                        topProcesses = allProcesses
+                            .OrderByDescending(p => p.PrivateMemorySize64)
+                            .Take(5)
+                            .Select(p => {
+                                long privateMemoryMB = p.PrivateMemorySize64 / (1024 * 1024);
+                                long workingSetMB = p.WorkingSet64 / (1024 * 1024);
+                                long sharedMemoryMB = workingSetMB > privateMemoryMB ? workingSetMB - privateMemoryMB : 0;
+                                return new ProcessMetric { ProcessName = p.ProcessName, MemoryUsageMB = privateMemoryMB, SharedMemoryUsageMB = sharedMemoryMB };
+                            })
+                            .ToList();
+                    }
+                    finally
+                    {
+                        // [수정] 사용한 모든 프로세스 객체 명시적 해제
+                        foreach (var p in allProcesses)
+                        {
+                            try { p.Dispose(); } catch { }
+                        }
+                    }
                 }
                 catch (Exception procEx)
                 {
@@ -442,9 +455,7 @@ namespace ITM_Agent.Services
                 if (_isInitialized)
                 {
                     logManager.LogError($"[HardwareSampler] Failed to sample hardware info: {ex.Message}");
-                    // ▼▼▼ 오류 발생 부분 수정: IsDebugMode 대신 LogManager.GlobalDebugEnabled 사용 ▼▼▼
                     if (LogManager.GlobalDebugEnabled) logManager.LogDebug($"[HardwareSampler] Sampling Exception details: {ex.StackTrace}");
-                    // ▲▲▲ 수정 끝 ▲▲▲
                 }
             }
         } // Sample() 메서드 끝
