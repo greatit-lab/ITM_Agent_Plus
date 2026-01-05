@@ -44,7 +44,7 @@ namespace ITM_Agent.ucPanel
 
         // [수정] 플러그인 런타임 캐시 추가 (메모리 누수 방지용)
         // Key: PluginName, Value: (Loaded Assembly Type, MethodInfo)
-        private readonly ConcurrentDictionary<string, PluginRuntimeInfo> _pluginRuntimeCache = 
+        private readonly ConcurrentDictionary<string, PluginRuntimeInfo> _pluginRuntimeCache =
             new ConcurrentDictionary<string, PluginRuntimeInfo>(StringComparer.OrdinalIgnoreCase);
 
         private class PluginRuntimeInfo
@@ -603,7 +603,7 @@ namespace ITM_Agent.ucPanel
                         {
                             mi = targetType.GetMethod("ProcessAndUpload", new[] { typeof(string), typeof(string) });
                             requiresThreeArgs = false;
-                            
+
                             if (mi == null)
                             {
                                 mi = targetType.GetMethod("ProcessAndUpload", new[] { typeof(string) });
@@ -623,7 +623,7 @@ namespace ITM_Agent.ucPanel
                             Method = mi,
                             RequiresThreeArgs = requiresThreeArgs
                         };
-                        
+
                         _pluginRuntimeCache.TryAdd(pluginName, runtimeInfo);
                         _logManager.LogEvent($"[ucUploadPanel] Plugin loaded and cached: {pluginName}");
                     }
@@ -638,7 +638,7 @@ namespace ITM_Agent.ucPanel
                 if (runtimeInfo != null && runtimeInfo.Method != null)
                 {
                     object pluginObj = Activator.CreateInstance(runtimeInfo.ClassType);
-                    
+
                     object[] args;
                     var parameters = runtimeInfo.Method.GetParameters();
 
@@ -745,11 +745,11 @@ namespace ITM_Agent.ucPanel
         }
 
         // [수정] 플러그인 변경 시 캐시 초기화 (업데이트 반영)
-        private void OnPluginsChanged(object sender, EventArgs e) 
-        { 
-            InitializeComboBoxColumns(); 
+        private void OnPluginsChanged(object sender, EventArgs e)
+        {
+            InitializeComboBoxColumns();
             RefreshPluginMetadataCache();
-            
+
             // 캐시 초기화하여 변경된 DLL을 다시 로드할 수 있게 함
             _pluginRuntimeCache.Clear();
             _logManager.LogEvent("[ucUploadPanel] Plugins changed - Cache cleared.");
