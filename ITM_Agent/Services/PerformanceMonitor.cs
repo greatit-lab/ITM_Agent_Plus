@@ -264,11 +264,23 @@ namespace ITM_Agent.Services
             }
         }
 
+        // ▼▼▼ [수정] Start() 메서드에 computer.Open() 추가 (재시작 시 센서 활성화) ▼▼▼
         public void Start()
         {
             if (_isInitialized)
             {
-                // _sensorInfoLogged = false; // 필요 시 주석 해제
+                try
+                {
+                    // Stop()에서 Close()된 하드웨어 모니터를 다시 엽니다.
+                    // 이 부분이 없으면 재시작 시 센서 값이 모두 0으로 읽힙니다.
+                    computer.Open();
+                }
+                catch (Exception ex)
+                {
+                    logManager.LogError($"[HardwareSampler] Failed to reopen computer sensors: {ex.Message}");
+                }
+
+                // _sensorInfoLogged = false; // 필요 시 주석 해제하여 디버그 로그 다시 기록
                 timer = new Timer(_ => Sample(), null, 0, interval);
             }
             else
@@ -276,6 +288,7 @@ namespace ITM_Agent.Services
                 logManager.LogEvent("[HardwareSampler] Skipping Start() because initial hardware monitor load failed.");
             }
         }
+        // ▲▲▲ 수정 끝 ▲▲▲
 
         public void Stop()
         {
