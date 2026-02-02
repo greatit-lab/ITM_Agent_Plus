@@ -6,42 +6,161 @@ using System.Threading;
 using System.Reflection;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.IO.Compression; // [필수] ZipArchive 클래스 사용
 
 namespace ITM_Agent.Services
 {
     /// <summary>
     /// 이벤트 로그, 디버그 로그, 에러 로그 등을 기록하고,
-    /// 각 로그 파일이 5MB를 초과할 경우 파일을 회전(로테이션)하는 클래스입니다.
+    /// 5MB 초과 시 회전(Rotation)하며, 오래된 로그를 압축 및 정리하는 클래스입니다.
     /// </summary>
     public class LogManager
     {
         private readonly string logFolderPath;
         private const long MAX_LOG_SIZE = 5 * 1024 * 1024; // 5MB
 
-        /* ────────────────────────────────────────────────────────────── */
-        /* ★ 추가 : 모든 인스턴스에서 공유하는 Debug 전역 플래그           */
-        /* ────────────────────────────────────────────────────────────── */
+        // 전역 디버그 플래그
         private static volatile bool _globalDebugEnabled = false;
-        public static bool GlobalDebugEnabled          // MainForm 등에서 ON/OFF
+        public static bool GlobalDebugEnabled
         {
             get => _globalDebugEnabled;
             set => _globalDebugEnabled = value;
         }
-        /* ────────────────────────────────────────────────────────────── */
+
+        // IP 마스킹 정규식
+        private static readonly Regex _ipMaskRegex = new Regex(
+            @"\b(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\b",
+            RegexOptions.Compiled);
+
+        // ─────────────────────────────────────────────────────────────
+        // [신규] 로그 유지보수(압축/삭제)를 위한 정적 멤버
+        // ─────────────────────────────────────────────────────────────
+        private static Timer _maintenanceTimer;
+        private static readonly object _maintenanceLock = new object();
+        private static bool _isMaintenanceStarted = false;
+        private const int RETENTION_DAYS = 30; // 보관 주기 30일
 
         public LogManager(string baseDir)
         {
             logFolderPath = Path.Combine(baseDir, "Logs");
             Directory.CreateDirectory(logFolderPath);
+
+            // [신규] 유지보수 타이머 시작 (앱 실행 중 최초 1회만 기동)
+            StartMaintenanceTimer(logFolderPath);
+        }
+
+        private static void StartMaintenanceTimer(string logDir)
+        {
+            lock (_maintenanceLock)
+            {
+                if (_isMaintenanceStarted) return;
+                _isMaintenanceStarted = true;
+
+                // 1분 후 첫 실행, 이후 1시간마다 반복
+                _maintenanceTimer = new Timer(
+                    state => PerformLogMaintenance((string)state),
+                    logDir,
+                    TimeSpan.FromMinutes(1),
+                    TimeSpan.FromHours(1));
+            }
         }
 
         /// <summary>
-        /// (이벤트 로그) 간략하고 핵심적인 메시지만 기록.
-        /// 5MB 초과 시 "yyyyMMdd_event_1.log"로 회전.
+        /// 백그라운드에서 오래된 로그를 압축하고 삭제합니다.
         /// </summary>
+        private static void PerformLogMaintenance(string targetDir)
+        {
+            try
+            {
+                if (!Directory.Exists(targetDir)) return;
+
+                DateTime now = DateTime.Now;
+                DateTime retentionLimit = now.AddDays(-RETENTION_DAYS);
+                string todayStr = now.ToString("yyyyMMdd");
+
+                // 1. 오래된 파일 삭제 (Retention Policy)
+                //    - .log, .zip 등 모든 파일 대상
+                //    - 30일이 지난 파일 삭제
+                var allFiles = Directory.GetFiles(targetDir);
+                foreach (var file in allFiles)
+                {
+                    try
+                    {
+                        if (File.GetLastWriteTime(file) < retentionLimit)
+                        {
+                            File.Delete(file);
+                        }
+                    }
+                    catch { /* 사용 중이거나 권한 없음 - 무시 */ }
+                }
+
+                // 2. 로그 파일 압축 (Compression)
+                //    대상: .log 파일 중
+                //      A) 오늘 날짜가 아닌 파일 (과거 로그)
+                //      B) 오늘 날짜라도 회전된 파일 (_1, _2 등)
+                var logFiles = Directory.GetFiles(targetDir, "*.log");
+                foreach (var logFile in logFiles)
+                {
+                    try
+                    {
+                        string fileName = Path.GetFileName(logFile);
+                        string fileNameNoExt = Path.GetFileNameWithoutExtension(logFile);
+
+                        // 조건 A: 날짜가 오늘이 아닌 파일 (예: 20250101_event.log)
+                        bool isPastLog = !fileName.StartsWith(todayStr);
+
+                        // 조건 B: 회전된 파일 (예: ..._event_1.log)
+                        // 정규식: 끝이 _숫자 로 끝나는지 확인
+                        bool isRotatedLog = Regex.IsMatch(fileNameNoExt, @"_\d+$");
+
+                        // 압축 대상이면 진행
+                        if (isPastLog || isRotatedLog)
+                        {
+                            string zipPath = Path.Combine(targetDir, fileNameNoExt + ".zip");
+
+                            // 이미 압축 파일이 있으면 덮어쓰거나 건너뜀 (여기선 생성 시도)
+                            if (!File.Exists(zipPath))
+                            {
+                                // ▼▼▼ [수정] ZipFile(CS0103 오류 원인) 대신 ZipArchive 사용 ▼▼▼
+                                // 이 방식은 추가 참조 없이 기본 System.IO.Compression만으로 동작합니다.
+                                using (var zipStream = new FileStream(zipPath, FileMode.Create))
+                                using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Create))
+                                {
+                                    // 엔트리 생성
+                                    var entry = archive.CreateEntry(fileName);
+                                    
+                                    // 원본 파일 스트림 -> 압축 엔트리 스트림 복사
+                                    using (var entryStream = entry.Open())
+                                    using (var sourceStream = new FileStream(logFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                                    {
+                                        sourceStream.CopyTo(entryStream);
+                                    }
+                                }
+                                // ▲▲▲ 수정 끝 ▲▲▲
+
+                                // 압축 성공 시 원본 삭제
+                                File.Delete(logFile);
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // 압축 중 오류(파일 잠김 등) 발생 시 다음 주기에 처리
+                    }
+                }
+            }
+            catch
+            {
+                // 유지보수 로직 전체 실패 시 무시 (메인 로직 영향 없음)
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        // 기존 로깅 메서드 (변경 없음)
+        // ─────────────────────────────────────────────────────────────
+
         public void LogEvent(string message)
         {
-            // 이벤트 로그: 간략 표기 [EVT]
             string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
             string logFileName = $"{DateTime.Now:yyyyMMdd}_event.log";
             string logLine = $"{timestamp} [Event] {message}";
@@ -49,26 +168,12 @@ namespace ITM_Agent.Services
             WriteLogWithRotation(logLine, logFileName);
         }
 
-        /// <summary>
-        /// 이벤트/디버그 로그 통합 메서드
-        /// isDebug가 true이면 디버그로, 아니면 이벤트로 기록
-        /// </summary>
         public void LogEvent(string message, bool isDebug)
         {
-            if (isDebug)
-            {
-                LogDebug(message);
-            }
-            else
-            {
-                LogEvent(message);
-            }
+            if (isDebug) LogDebug(message);
+            else LogEvent(message);
         }
 
-        /// <summary>
-        /// (에러 로그) 오류 상황에만 기록.
-        /// 5MB 초과 시 "yyyyMMdd_error_1.log"로 회전.
-        /// </summary>
         public void LogError(string message)
         {
             string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
@@ -78,10 +183,9 @@ namespace ITM_Agent.Services
             WriteLogWithRotation(logLine, logFileName);
         }
 
-        /* ★★ 수정 : 전역 플래그가 켜졌을 때만 기록 ★★ */
         public void LogDebug(string message)
         {
-            if (!GlobalDebugEnabled) return;          // Debug OFF → 바로 반환
+            if (!GlobalDebugEnabled) return;
 
             string ts = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
             string log = $"{ts} [Debug] {message}";
@@ -90,10 +194,6 @@ namespace ITM_Agent.Services
             WriteLogWithRotation(log, fileName);
         }
 
-        /// <summary>
-        /// 필요시 사용자 정의 로그 유형 지정 가능
-        /// ex) LogCustom("message", "info") => yyyyMMdd_info.log
-        /// </summary>
         public void LogCustom(string message, string logType)
         {
             string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
@@ -103,101 +203,73 @@ namespace ITM_Agent.Services
             WriteLogWithRotation(logLine, fileName);
         }
 
-        // IP 마스킹을 위한 정규식 (클래스 멤버로 추가)
-        /// <summary>
-        /// IP 주소를 찾아서 마지막 옥텟을 마스킹하는 정규식입니다.
-        /// 예: "10.0.0.1" -> "*.*.*.1"
-        /// </summary>
-        private static readonly Regex _ipMaskRegex = new Regex(
-            @"\b(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\b",
-            RegexOptions.Compiled);
-
-        /// <summary>
-        /// 로그 메시지에서 IP 주소를 마스킹합니다.
-        /// </summary>
         private string MaskIpAddress(string message)
         {
-            // IP 주소 패턴(예: 10.0.0.1)을 찾아서 "*.*.*.1"로 변경합니다.
             return _ipMaskRegex.Replace(message, "*.*.*.$4");
         }
 
         private void WriteLogWithRotation(string message, string fileName)
         {
-            // 로그 파일에 쓰기 전에 IP 마스킹 적용
             string maskedMessage = MaskIpAddress(message);
             string filePath = Path.Combine(logFolderPath, fileName);
 
             try
             {
-                // (1) 5 MB 초과 시 회전
                 RotateLogFileIfNeeded(filePath);
 
-                // (2) FileShare.ReadWrite 로 열기  ➜  다른 쓰기 스트림과 공존
                 const int MAX_RETRY = 3;
                 for (int attempt = 1; attempt <= MAX_RETRY; attempt++)
                 {
                     try
                     {
-                        using (var fs = new FileStream(
-                                   filePath,
-                                   FileMode.OpenOrCreate,
-                                   FileAccess.Write,
-                                   FileShare.ReadWrite))          // 핵심 변경
+                        using (var fs = new FileStream(filePath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite))
                         {
-                            fs.Seek(0, SeekOrigin.End);          // 항상 Append
+                            fs.Seek(0, SeekOrigin.End);
                             using (var sw = new StreamWriter(fs, Encoding.UTF8))
                             {
                                 sw.WriteLine(maskedMessage);
                             }
                         }
-                        return;                                   // 성공 시 종료
+                        return;
                     }
                     catch (IOException) when (attempt < MAX_RETRY)
                     {
-                        // 잠시 후 재시도
                         Thread.Sleep(250);
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Failed to write log after retries: {ex.Message}");
+                Console.WriteLine($"Failed to write log: {ex.Message}");
             }
         }
 
-        // ================== 개선된 전체 메서드 ==================
         private void RotateLogFileIfNeeded(string filePath)
         {
-            if (!File.Exists(filePath))
-                return;
+            if (!File.Exists(filePath)) return;
 
             FileInfo fi = new FileInfo(filePath);
+            if (fi.Length <= MAX_LOG_SIZE) return;
 
-            // (1) 5 MB 이하이면 그대로 사용
-            if (fi.Length <= MAX_LOG_SIZE)
-                return;
+            string extension = fi.Extension;
+            string withoutExt = Path.GetFileNameWithoutExtension(filePath);
 
-            // (2) 확장자 / 기본 이름 분리
-            string extension = fi.Extension;                               // ".log"
-            string withoutExt = Path.GetFileNameWithoutExtension(filePath); // "20250711_event"
-
-            // (3) 다음 회전 인덱스 계산
             int index = 1;
             string rotatedPath;
             do
             {
-                string rotatedName = $"{withoutExt}_{index}{extension}";     // ex) "20250711_event_3.log"
+                string rotatedName = $"{withoutExt}_{index}{extension}";
                 rotatedPath = Path.Combine(logFolderPath, rotatedName);
                 index++;
             }
-            while (File.Exists(rotatedPath));  // 존재하는 파일이 없을 때까지 증가
+            while (File.Exists(rotatedPath));
 
-            // (4) 원본 → 새 인덱스 파일로 이동
-            File.Move(filePath, rotatedPath);
-
-            // (5) 이후 WriteLogWithRotation() 가 호출되면서
-            //     같은 이름의 새로운 원본 로그(0번) 파일이 자동 생성되어
-            //     이어서 로그가 기록됨.
+            try
+            {
+                File.Move(filePath, rotatedPath);
+                // 회전된 파일은 다음번 Maintenance 주기(1시간 내)에 압축됨
+            }
+            catch { }
         }
 
         public static void BroadcastPluginDebug(bool enabled)
@@ -208,14 +280,8 @@ namespace ITM_Agent.Services
                 foreach (var asm in asms)
                 {
                     Type[] types;
-                    try
-                    {
-                        types = asm.GetTypes();
-                    }
-                    catch (ReflectionTypeLoadException ex)
-                    {
-                        types = ex.Types.Where(t => t != null).ToArray();
-                    }
+                    try { types = asm.GetTypes(); }
+                    catch (ReflectionTypeLoadException ex) { types = ex.Types.Where(t => t != null).ToArray(); }
                     if (types == null) continue;
 
                     foreach (var t in types)
@@ -223,7 +289,6 @@ namespace ITM_Agent.Services
                         if (!t.IsClass) continue;
                         if (!string.Equals(t.Name, "SimpleLogger", StringComparison.Ordinal)) continue;
 
-                        // 우선순위: SetDebugMode(bool) → SetDebug(bool)
                         var m = t.GetMethod("SetDebugMode", BindingFlags.Public | BindingFlags.Static);
                         if (m == null) m = t.GetMethod("SetDebug", BindingFlags.Public | BindingFlags.Static);
                         if (m == null) continue;
@@ -231,13 +296,12 @@ namespace ITM_Agent.Services
                         var ps = m.GetParameters();
                         if (ps.Length == 1 && ps[0].ParameterType == typeof(bool))
                         {
-                            try { m.Invoke(null, new object[] { enabled }); }
-                            catch { /* 플러그인 내부 예외는 무시(다른 플러그인 영향 방지) */ }
+                            try { m.Invoke(null, new object[] { enabled }); } catch { }
                         }
                     }
                 }
             }
-            catch { /* 전체 브로드캐스트 실패는 무시(기본 로깅 동작엔 영향 없음) */ }
+            catch { }
         }
     }
 }
