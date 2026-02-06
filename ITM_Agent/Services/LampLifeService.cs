@@ -83,8 +83,8 @@ namespace ITM_Agent.Services
                     {
                         // 스킵 모드일 때는 isInitialMapping=false로 하여 단순 업데이트만 수행하거나
                         // 필요에 따라 true로 유지. 여기서는 안전하게 false(주기적 모드)로 진입 권장
-                        bool isInitial = uiSuccess; 
-                        
+                        bool isInitial = uiSuccess;
+
                         _logManager.LogEvent("[LampLifeService] Connecting to MSSQL for Sync...");
                         await SyncWithEquipmentDatabaseAsync(isInitial);
                     }
