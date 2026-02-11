@@ -264,15 +264,12 @@ namespace ITM_Agent.Services
             }
         }
 
-        // [수정] Start() 메서드에 computer.Open() 추가 (재시작 시 센서 활성화)
         public void Start()
         {
             if (_isInitialized)
             {
                 try
                 {
-                    // Stop()에서 Close()된 하드웨어 모니터를 다시 엽니다.
-                    // 이 부분이 없으면 재시작 시 센서 값이 모두 0으로 읽힙니다.
                     computer.Open();
                 }
                 catch (Exception ex)
@@ -351,7 +348,7 @@ namespace ITM_Agent.Services
                     }
                 }
 
-                // --- 나머지 센서 값 읽기 로직 (이전과 동일) ---
+                // --- 센서 값 읽기 ---
                 var cpu = computer.Hardware.FirstOrDefault(h => h.HardwareType == HardwareType.Cpu);
                 if (cpu != null)
                 {
@@ -384,44 +381,47 @@ namespace ITM_Agent.Services
                 var cpuFanSensor = allSensors.FirstOrDefault(s => s.SensorType == SensorType.Fan && (s.Name.Contains("CPU") || s.Name.Equals("Fan #1", StringComparison.OrdinalIgnoreCase) || s.Name.Contains("System Fan")));
                 fanRpm = (int)(cpuFanSensor?.Value ?? allSensors.FirstOrDefault(s => s.SensorType == SensorType.Fan)?.Value ?? 0);
 
-                // --- 실패 감지 및 자동 복구 로직 (이전과 동일) ---
+                // --- [수정] 실패 감지 및 자동 복구 로직 개선 ---
+                // 기존: 온도가 0이면 return하여 데이터를 버림 -> 수정: 온도 0이어도 진행
                 bool hasCpuError = cpuUsage == 0;
                 bool hasMemError = memUsage == 0;
-                bool hasTempError = cpuTemp == 0;
+                // hasTempError 변수 제거 또는 로직에서 제외
 
-                if ((hasCpuError && hasMemError) || hasTempError)
+                // CPU와 메모리가 둘 다 0일 때만 심각한 오류로 판단
+                if (hasCpuError && hasMemError)
                 {
                     _consecutiveFailures++;
-                    string failureDetails = $"Invalid sample detected (CPU Usage: {cpuUsage:F2}, Mem Usage: {memUsage:F2}, CPU Temp: {cpuTemp:F1}). Consecutive failures: {_consecutiveFailures}";
-                    logManager.LogDebug($"[HardwareSampler] {failureDetails}");
+                    string failureDetails = $"Invalid sample detected (CPU: {cpuUsage:F2}, Mem: {memUsage:F2}). Failures: {_consecutiveFailures}";
+                    
+                    if (LogManager.GlobalDebugEnabled)
+                        logManager.LogDebug($"[HardwareSampler] {failureDetails}");
 
                     if (_consecutiveFailures >= FAILURE_THRESHOLD)
                     {
-                        logManager.LogEvent("[HardwareSampler] Consecutive sensor failures reached threshold. Attempting to re-initialize hardware monitor.");
+                        logManager.LogEvent("[HardwareSampler] Consecutive sensor failures reached threshold. Re-initializing...");
                         try
                         {
                             computer.Close();
                             computer.Open();
                             _consecutiveFailures = 0;
-                            _sensorInfoLogged = false; // 재초기화 성공 시 플래그 리셋
-                            logManager.LogEvent("[HardwareSampler] Hardware monitor re-initialized successfully.");
+                            _sensorInfoLogged = false; 
+                            logManager.LogEvent("[HardwareSampler] Hardware monitor re-initialized.");
                         }
                         catch (Exception ex)
                         {
-                            logManager.LogError($"[HardwareSampler] CRITICAL: Failed to re-initialize hardware monitor: {ex.Message}. Stopping performance sampling.");
+                            logManager.LogError($"[HardwareSampler] Re-init failed: {ex.Message}. Stopping.");
                             this.Stop();
-                            _isInitialized = false; // 재초기화 실패 시 상태 변경
+                            _isInitialized = false;
                         }
                     }
-                    return;
+                    return; // 정말 아무것도 못 읽었을 때만 리턴
                 }
                 _consecutiveFailures = 0;
 
-                // --- Top 5 프로세스 정보 수집 (메모리/핸들 누수 방지 수정) ---
+                // --- Top 5 프로세스 정보 수집 ---
                 var topProcesses = new List<ProcessMetric>();
                 try
                 {
-                    // [수정] Process.GetProcesses() 반환 객체는 반드시 Dispose 해야 함
                     Process[] allProcesses = Process.GetProcesses();
                     try
                     {
@@ -438,7 +438,6 @@ namespace ITM_Agent.Services
                     }
                     finally
                     {
-                        // [수정] 사용한 모든 프로세스 객체 명시적 해제
                         foreach (var p in allProcesses)
                         {
                             try { p.Dispose(); } catch { }
@@ -450,7 +449,7 @@ namespace ITM_Agent.Services
                     logManager.LogDebug($"[HardwareSampler] Failed to get process list: {procEx.Message}");
                 }
 
-                // --- 이벤트 발생 (이전과 동일) ---
+                // --- 이벤트 발생 (온도가 0이어도 발생함) ---
                 OnSample?.Invoke(new Metric(cpuUsage, memUsage, cpuTemp, gpuTemp, fanRpm, topProcesses));
 
                 bool isOver = (cpuUsage > 75f) || (memUsage > 80f);
@@ -459,19 +458,16 @@ namespace ITM_Agent.Services
             }
             catch (NullReferenceException nre) when (!_isInitialized)
             {
-                logManager.LogError($"[HardwareSampler] Attempted to sample but hardware monitor is not initialized. {nre.Message}");
+                logManager.LogError($"[HardwareSampler] Not initialized. {nre.Message}");
                 this.Stop();
             }
             catch (Exception ex)
             {
                 if (_isInitialized)
                 {
-                    logManager.LogError($"[HardwareSampler] Failed to sample hardware info: {ex.Message}");
-                    if (LogManager.GlobalDebugEnabled) logManager.LogDebug($"[HardwareSampler] Sampling Exception details: {ex.StackTrace}");
+                    logManager.LogError($"[HardwareSampler] Failed to sample: {ex.Message}");
                 }
             }
-        } // Sample() 메서드 끝
-
-    } // HardwareSampler 클래스 끝
-
-} // 네임스페이스 끝
+        } 
+    } 
+}
