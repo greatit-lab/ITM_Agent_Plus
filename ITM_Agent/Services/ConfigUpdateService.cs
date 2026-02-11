@@ -86,16 +86,20 @@ namespace ITM_Agent.Services
                 {
                     await conn.OpenAsync();
 
+                    // [수정] 밀리초 제거를 위해 C#에서 정제된 시간을 생성하여 파라미터로 전달
+                    DateTime now = DateTime.Now;
+                    DateTime cleanTime = new DateTime(now.Year, now.Month, now.Day, now.Hour, now.Minute, now.Second);
+
                     // (2) cfg_server 테이블에서 내 EQPID 정보 조회 (최초 자동 등록 및 하트비트)
-                    // (요청사항 반영: 컬럼명 'update', NOW()::timestamp(0) 사용)
+                    // [수정] update 컬럼에 @update_time 파라미터 사용
                     const string sqlPoll = @"
                         INSERT INTO public.cfg_server (eqpid, agent_db_host, agent_ftp_host, update_flag, ""update"")
-                        VALUES (@eqpid, @db_host, @ftp_host, 'no', NOW()::timestamp(0))
+                        VALUES (@eqpid, @db_host, @ftp_host, 'no', @update_time)
                         ON CONFLICT (eqpid) DO UPDATE
                         SET 
                             agent_db_host = EXCLUDED.agent_db_host,
                             agent_ftp_host = EXCLUDED.agent_ftp_host,
-                            ""update"" = NOW()::timestamp(0)
+                            ""update"" = @update_time
                         RETURNING update_flag;";
 
                     // Connection.ini에서 현재 설정 읽기
@@ -125,6 +129,8 @@ namespace ITM_Agent.Services
                         cmd.Parameters.AddWithValue("@eqpid", _eqpid);
                         cmd.Parameters.AddWithValue("@db_host", iniDbHost);
                         cmd.Parameters.AddWithValue("@ftp_host", iniFtpHost);
+                        // [수정] 정제된 cleanTime 전달
+                        cmd.Parameters.AddWithValue("@update_time", cleanTime);
 
                         updateFlag = (string)await cmd.ExecuteScalarAsync();
                     }
@@ -278,15 +284,19 @@ namespace ITM_Agent.Services
                 {
                     await conn.OpenAsync();
 
-                    // (9) cfg_server 테이블에 최종 상태 업데이트 (신규 DB에도 이 테이블이 있어야 함)
-                    // (요청사항 반영: 컬럼명 'update', NOW()::timestamp(0) 사용)
+                    // [수정] 밀리초 제거된 cleanTime 사용
+                    DateTime now = DateTime.Now;
+                    DateTime cleanTime = new DateTime(now.Year, now.Month, now.Day, now.Hour, now.Minute, now.Second);
+
+                    // (9) cfg_server 테이블에 최종 상태 업데이트
+                    // [수정] update 컬럼에 @update_time 파라미터 사용
                     const string sqlConfirm = @"
                         UPDATE public.cfg_server 
                         SET 
                             agent_db_host = @db_host,
                             agent_ftp_host = @ftp_host,
                             update_flag = 'no',
-                            ""update"" = NOW()::timestamp(0)
+                            ""update"" = @update_time
                         WHERE eqpid = @eqpid;";
 
                     using (var cmd = new NpgsqlCommand(sqlConfirm, conn))
@@ -294,6 +304,9 @@ namespace ITM_Agent.Services
                         cmd.Parameters.AddWithValue("@db_host", newDbHost);
                         cmd.Parameters.AddWithValue("@ftp_host", newFtpHost ?? "N/A"); // (null 방지)
                         cmd.Parameters.AddWithValue("@eqpid", _eqpid);
+                        // [수정] 정제된 cleanTime 전달
+                        cmd.Parameters.AddWithValue("@update_time", cleanTime);
+
                         int affected = await cmd.ExecuteNonQueryAsync();
 
                         if (affected > 0)
@@ -306,7 +319,7 @@ namespace ITM_Agent.Services
                             _logManager.LogEvent("[ConfigUpdateService] Update confirmation: EQPID not found in new DB's cfg_server. Attempting INSERT.");
                             const string sqlInsertConfirm = @"
                                 INSERT INTO public.cfg_server (eqpid, agent_db_host, agent_ftp_host, update_flag, ""update"")
-                                VALUES (@eqpid, @db_host, @ftp_host, 'no', NOW()::timestamp(0))
+                                VALUES (@eqpid, @db_host, @ftp_host, 'no', @update_time)
                                 ON CONFLICT (eqpid) DO NOTHING;";
 
                             using (var cmdInsert = new NpgsqlCommand(sqlInsertConfirm, conn))
@@ -314,6 +327,7 @@ namespace ITM_Agent.Services
                                 cmdInsert.Parameters.AddWithValue("@eqpid", _eqpid);
                                 cmdInsert.Parameters.AddWithValue("@db_host", newDbHost);
                                 cmdInsert.Parameters.AddWithValue("@ftp_host", newFtpHost ?? "N/A"); // (null 방지)
+                                cmdInsert.Parameters.AddWithValue("@update_time", cleanTime);
                                 await cmdInsert.ExecuteNonQueryAsync();
                             }
                         }
