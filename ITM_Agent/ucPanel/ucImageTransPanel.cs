@@ -13,7 +13,7 @@ namespace ITM_Agent.ucPanel
 {
     public partial class ucImageTransPanel : UserControl
     {
-        private static readonly HashSet<string> mergedBaseNames = new HashSet<string>();  
+        private static readonly HashSet<string> mergedBaseNames = new HashSet<string>();
         private readonly LogManager logManager;
         private readonly PdfMergeManager pdfMergeManager;
         private readonly SettingsManager settingsManager;
@@ -27,7 +27,7 @@ namespace ITM_Agent.ucPanel
 
         private bool isRunning = false;
         private System.Threading.Timer _cleanupTimer;
-        
+
         private System.Threading.Timer _pollingTimer;
 
         public event Action ImageSaveFolderChanged;
@@ -79,7 +79,7 @@ namespace ITM_Agent.ucPanel
             {
                 StartWatchingFolder();
                 _cleanupTimer = new System.Threading.Timer(
-                    _ => ClearMergedBaseNames(), null, TimeSpan.FromHours(24), TimeSpan.FromHours(24)  
+                    _ => ClearMergedBaseNames(), null, TimeSpan.FromHours(24), TimeSpan.FromHours(24)
                 );
 
                 _pollingTimer = new System.Threading.Timer(_ => PollUnprocessedImages(), null, 5000, 5000);
@@ -89,7 +89,7 @@ namespace ITM_Agent.ucPanel
                 StopWatchingFolder();
                 _cleanupTimer?.Dispose();
                 _cleanupTimer = null;
-                
+
                 _pollingTimer?.Dispose();
                 _pollingTimer = null;
             }
@@ -111,7 +111,7 @@ namespace ITM_Agent.ucPanel
 
         private void StartWatchingFolder()
         {
-            StopWatchingFolder(); 
+            StopWatchingFolder();
 
             string targetFolder = settingsManager.GetValueFromSection("ImageTrans", "Target");
             if (string.IsNullOrEmpty(targetFolder) || !Directory.Exists(targetFolder))
@@ -126,7 +126,7 @@ namespace ITM_Agent.ucPanel
                 Filter = "*.*",
                 NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite,
                 IncludeSubdirectories = false,
-                InternalBufferSize = 65536 
+                InternalBufferSize = 65536
             };
 
             imageWatcher.Renamed += OnImageFileChanged;
@@ -197,7 +197,7 @@ namespace ITM_Agent.ucPanel
                     {
                         if (!changedFiles.ContainsKey(file))
                         {
-                            changedFiles[file] = now; 
+                            changedFiles[file] = now;
                         }
                     }
                 }
@@ -323,7 +323,7 @@ namespace ITM_Agent.ucPanel
             }
 
             if (int.TryParse(waitStr, out int ws)) return ws;
-            return 30; 
+            return 30;
         }
         #endregion
 
@@ -331,13 +331,13 @@ namespace ITM_Agent.ucPanel
         {
             string fnNoExt = Path.GetFileNameWithoutExtension(filePath);
             var m0 = Regex.Match(fnNoExt, @"^(?<base>.+)_(?<page>\d+)$");
-            if (!m0.Success) return;                 
+            if (!m0.Success) return;
 
-            string baseName = m0.Groups["base"].Value;   
+            string baseName = m0.Groups["base"].Value;
             
             // [개선] 파일명에 포함된 '.' 및 '#' 기호를 언더바('_')로 치환하여 웹 환경(URL) 호환성 확보
-            string safeBaseName = baseName.Replace('.', '_').Replace('#', '_'); 
-            
+            string safeBaseName = baseName.Replace('.', '_').Replace('#', '_');
+
             string folder = Path.GetDirectoryName(filePath);
 
             lock (mergedBaseNames)
@@ -372,11 +372,11 @@ namespace ITM_Agent.ucPanel
             string outputFolder = settingsManager.GetValueFromSection("ImageTrans", "SaveFolder");
             if (string.IsNullOrEmpty(outputFolder) || !Directory.Exists(outputFolder))
             {
-                outputFolder = folder;  
+                outputFolder = folder;
                 logManager.LogEvent("[ucImageTransPanel] SaveFolder 미설정/미존재 ▶ 이미지 폴더로 대체 저장");
             }
 
-            string outputPdfPath = Path.Combine(outputFolder, $"{safeBaseName}.pdf"); 
+            string outputPdfPath = Path.Combine(outputFolder, $"{safeBaseName}.pdf");
 
             pdfMergeManager.MergeImagesToPdf(imgList, outputPdfPath);
 
@@ -447,7 +447,7 @@ namespace ITM_Agent.ucPanel
             var regexFolders = configPanel.GetRegexList();
             var uniqueFolders = regexFolders.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
 
-            cb_TargetImageFolder.Items.AddRange(uniqueFolders);   
+            cb_TargetImageFolder.Items.AddRange(uniqueFolders);
 
             string selectedPath = settingsManager.GetValueFromSection("ImageTrans", "Target");
             if (!string.IsNullOrEmpty(selectedPath) && cb_TargetImageFolder.Items.Contains(selectedPath))
@@ -458,7 +458,7 @@ namespace ITM_Agent.ucPanel
             {
                 cb_TargetImageFolder.SelectedIndex = -1;
             }
-        }  
+        }
 
         private void LoadFolders()
         {
