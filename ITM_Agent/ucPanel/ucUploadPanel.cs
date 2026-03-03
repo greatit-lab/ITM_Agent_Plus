@@ -42,8 +42,7 @@ namespace ITM_Agent.ucPanel
         private readonly Dictionary<string, (string Task, string Filter, bool RequiresOverride)> _pluginMetadataCache =
             new Dictionary<string, (string Task, string Filter, bool RequiresOverride)>(StringComparer.OrdinalIgnoreCase);
 
-        // [수정] 플러그인 런타임 캐시 추가 (메모리 누수 방지용)
-        // Key: PluginName, Value: (Loaded Assembly Type, MethodInfo)
+        // 플러그인 런타임 캐시 추가 (메모리 누수 방지용)
         private readonly ConcurrentDictionary<string, PluginRuntimeInfo> _pluginRuntimeCache =
             new ConcurrentDictionary<string, PluginRuntimeInfo>(StringComparer.OrdinalIgnoreCase);
 
@@ -51,13 +50,12 @@ namespace ITM_Agent.ucPanel
         {
             public Type ClassType { get; set; }
             public MethodInfo Method { get; set; }
-            public bool RequiresThreeArgs { get; set; } // ProcessAndUpload(path, ini, object) vs (path, ini) vs (path)
+            public bool RequiresThreeArgs { get; set; }
         }
 
         private const string Tab1Section = "[UploadRulesTab1]";
         private const string Tab2Section = "[UploadRulesTab2]";
 
-        // [신규] 실행 및 일시정지 상태 관리
         private bool isRunning = false;
         private bool isPaused = false;
 
@@ -118,7 +116,6 @@ namespace ITM_Agent.ucPanel
 
         private void OnOverrideFileRenamed(string newFilePath)
         {
-            // 서버 끊김 상태면 처리 안 함
             if (isPaused) return;
 
             Task.Run(() =>
@@ -286,15 +283,13 @@ namespace ITM_Agent.ucPanel
 
         #endregion
 
-        #region --- [핵심 수정] Watcher 및 상태 제어 ---
+        #region --- Watcher 및 상태 제어 ---
 
-        // [신규] MainForm에서 화면 전환 시 상태 동기화를 위해 호출
         public void InitializePanel(bool isRunning)
         {
             UpdateStatusOnRun(isRunning);
         }
 
-        // [신규] 서버 끊김 시 감시 일시 정지 (UI 잠금은 유지)
         public void PauseWatching()
         {
             if (!isRunning) return;
@@ -305,27 +300,22 @@ namespace ITM_Agent.ucPanel
             _logManager.LogEvent("[ucUploadPanel] Watchers Paused (Server Holding).");
         }
 
-        // [신규] 서버 복구 시 감시 재개
         public void ResumeWatching()
         {
             if (!isRunning) return;
 
             isPaused = false;
-            StopWatchers();      // 안전하게 리셋
-            InitializeWatchers(); // 다시 시작
+            StopWatchers();      
+            InitializeWatchers(); 
 
             _logManager.LogEvent("[ucUploadPanel] Watchers Resumed.");
         }
 
-        // 실행 상태 변경 (Run/Stop 버튼 클릭 시)
         public void UpdateStatusOnRun(bool isRunning)
         {
             this.isRunning = isRunning;
-
-            // isRunning이 true이면 (Running or Holding) UI는 잠금
             SetControlsEnabled(!isRunning);
 
-            // 감시 로직은 '실행중'이고 '일시정지 아님' 상태일 때만 켬
             if (isRunning && !isPaused)
             {
                 StopWatchers();
@@ -333,7 +323,6 @@ namespace ITM_Agent.ucPanel
             }
             else
             {
-                // Stop 상태이거나 Holding(Paused) 상태면 감시 끔
                 StopWatchers();
             }
         }
@@ -448,9 +437,11 @@ namespace ITM_Agent.ucPanel
                 try
                 {
                     if (!File.Exists(filePath)) return false;
-                    using (var stream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.None))
+                    
+                    // [핵심 개선] FileShare.None(독점 잠금) -> FileShare.ReadWrite | FileShare.Delete
+                    using (var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
                     {
-                        if (stream.Length > 0) return true;
+                        if (stream.Length >= 0) return true;
                     }
                 }
                 catch (IOException) { }
@@ -567,15 +558,12 @@ namespace ITM_Agent.ucPanel
             });
         }
 
-        // [수정] RunPlugin 메서드 전체 개선 (캐싱 적용으로 메모리 누수 해결)
         private void RunPlugin(string pluginName, string filePath)
         {
             try
             {
-                // 1. 캐시에서 먼저 조회
                 if (!_pluginRuntimeCache.TryGetValue(pluginName, out PluginRuntimeInfo runtimeInfo))
                 {
-                    // 2. 캐시 미스 시 로딩 절차 수행 (최초 1회만 실행됨)
                     var pluginItem = _pluginPanel.GetLoadedPlugins().FirstOrDefault(p => p.PluginName.Equals(pluginName, StringComparison.OrdinalIgnoreCase));
                     if (pluginItem == null || !File.Exists(pluginItem.AssemblyPath))
                     {
@@ -586,7 +574,7 @@ namespace ITM_Agent.ucPanel
                     try
                     {
                         byte[] dllBytes = File.ReadAllBytes(pluginItem.AssemblyPath);
-                        Assembly asm = Assembly.Load(dllBytes); // 최초 1회 로드
+                        Assembly asm = Assembly.Load(dllBytes);
 
                         Type targetType = asm.GetTypes().FirstOrDefault(t => t.IsClass && !t.IsAbstract && t.GetMethods().Any(m => m.Name == "ProcessAndUpload"));
                         if (targetType == null)
@@ -595,7 +583,6 @@ namespace ITM_Agent.ucPanel
                             return;
                         }
 
-                        // 메서드 시그니처 확인 (ProcessAndUpload)
                         MethodInfo mi = targetType.GetMethod("ProcessAndUpload", new[] { typeof(string), typeof(object), typeof(object) });
                         bool requiresThreeArgs = true;
 
@@ -616,7 +603,6 @@ namespace ITM_Agent.ucPanel
                             return;
                         }
 
-                        // 런타임 정보 캐시에 저장
                         runtimeInfo = new PluginRuntimeInfo
                         {
                             ClassType = targetType,
@@ -634,7 +620,6 @@ namespace ITM_Agent.ucPanel
                     }
                 }
 
-                // 3. 캐시된 정보로 실행 (Activator로 인스턴스만 생성 - 가벼움)
                 if (runtimeInfo != null && runtimeInfo.Method != null)
                 {
                     object pluginObj = Activator.CreateInstance(runtimeInfo.ClassType);
@@ -642,7 +627,6 @@ namespace ITM_Agent.ucPanel
                     object[] args;
                     var parameters = runtimeInfo.Method.GetParameters();
 
-                    // 파라미터 개수에 따른 아규먼트 구성
                     if (parameters.Length == 3)
                     {
                         args = new object[] { filePath, Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Settings.ini"), null };
@@ -656,7 +640,6 @@ namespace ITM_Agent.ucPanel
                         args = new object[] { filePath };
                     }
 
-                    // 실행
                     Task.Run(() =>
                     {
                         try
@@ -744,13 +727,10 @@ namespace ITM_Agent.ucPanel
             }
         }
 
-        // [수정] 플러그인 변경 시 캐시 초기화 (업데이트 반영)
         private void OnPluginsChanged(object sender, EventArgs e)
         {
             InitializeComboBoxColumns();
             RefreshPluginMetadataCache();
-
-            // 캐시 초기화하여 변경된 DLL을 다시 로드할 수 있게 함
             _pluginRuntimeCache.Clear();
             _logManager.LogEvent("[ucUploadPanel] Plugins changed - Cache cleared.");
         }
@@ -759,8 +739,6 @@ namespace ITM_Agent.ucPanel
         {
             try
             {
-                // 메타데이터 로드는 ReflectionOnlyLoad 등을 사용할 수 없으므로 부득이하게 로드하지만,
-                // 빈번하지 않으므로 허용. 실제 실행 시의 누수를 막는 것이 핵심.
                 byte[] bytes = File.ReadAllBytes(dllPath);
                 Assembly asm = Assembly.Load(bytes);
                 var type = asm.GetTypes().FirstOrDefault(t => t.IsClass && !t.IsAbstract && t.GetMethods().Any(m => m.Name == "ProcessAndUpload"));
@@ -779,7 +757,6 @@ namespace ITM_Agent.ucPanel
 
         public void LoadImageSaveFolder_PathChanged() { InitializeComboBoxColumns(); LoadSettings(); }
 
-        // [수정] UI 비활성화 제어 로직
         private void SetControlsEnabled(bool enabled)
         {
             if (this.InvokeRequired)
