@@ -569,7 +569,7 @@ namespace ITM_Agent.ucPanel
                                 if (!File.Exists(targetFile))
                                 {
                                     if (settingsManager.IsDebugMode)
-                                        logManager.LogDebug($"[ucOverrideNamesPanel] 원본 파일을 찾을 수 없어 건너뜀: {targetFile}");
+                                        logManager.LogDebug($"[ucOverrideNamesPanel] 원본 파일을 찾을 수 없어 건너뜁니다: {targetFile}");
                                     continue;
                                 }
 
@@ -677,8 +677,8 @@ namespace ITM_Agent.ucPanel
             }
 
             var baselineData = new Dictionary<string, (string, string, string)>();
-            // [개선] 언더바(_)가 포함된 장비명(예: 31PT_AAA001)도 안전하게 파싱하도록 .+? 사용
-            var regex = new Regex(@"(\d{8}_\d{6})_(.+?)_(C\dW\d+)", RegexOptions.IgnoreCase);
+            // [수정] C\d+W\d+ 로 수정하여 두자리수 슬롯 지원 (C10W22 등)
+            var regex = new Regex(@"(\d{8}_\d{6})_(.+?)_(C\d+W\d+)", RegexOptions.IgnoreCase);
 
             foreach (var file in files)
             {
@@ -713,14 +713,35 @@ namespace ITM_Agent.ucPanel
             if (!fileName.Contains("_#1_")) return null; // _#1_ 이 없으면 변경 불필요
 
             var sortedData = baselineData.Values.OrderByDescending(d => d.TimeInfo).ToList();
+            
+            // 특수문자가 제거된 파일명(비교용)
+            string cleanFileName = Regex.Replace(fileName, @"[^a-zA-Z0-9]", "").ToUpperInvariant();
 
             foreach (var data in sortedData)
             {
-                // [가장 중요한 수정] 날짜/시간(TimeInfo)과 LotID(Prefix)가 모두 일치해야만 해당 슬롯 넘버(CInfo)로 매핑
-                // 이 조건이 충족되어야 C2W2, C2W3, C2W4가 일괄 C2W4로 덮어씌워지는 오류를 방지할 수 있습니다.
-                if (fileName.Contains(data.TimeInfo) && fileName.Contains(data.Prefix))
+                // [필수 1] 시간 문자열 완벽 일치 (시간이 다르면 다른 웨이퍼/스텝이므로 즉시 패스)
+                if (!fileName.Contains(data.TimeInfo))
                 {
-                    string newName = Regex.Replace(fileName, @"_#1_", $"_{data.CInfo}_");
+                    continue;
+                }
+
+                // [필수 2] Prefix를 조각내어 타겟 파일명에 100% 모두 포함되어 있는지 확인
+                string[] prefixTokens = data.Prefix.Split(new[] { '_' }, StringSplitOptions.RemoveEmptyEntries);
+                bool lotMatch = true;
+                foreach (string token in prefixTokens)
+                {
+                    string cleanToken = Regex.Replace(token, @"[^a-zA-Z0-9]", "").ToUpperInvariant();
+                    if (!cleanFileName.Contains(cleanToken))
+                    {
+                        lotMatch = false;
+                        break;
+                    }
+                }
+
+                // 시간과 모든 토큰이 완벽히 일치할 때만 CInfo(예: C2W1)로 변경
+                if (lotMatch)
+                {
+                    string newName = fileName.Replace("_#1_", $"_{data.CInfo}_");
 
                     if (newName.Equals(fileName, StringComparison.Ordinal))
                     {
@@ -741,6 +762,12 @@ namespace ITM_Agent.ucPanel
                                     logManager.LogDebug($"[ucOverrideNamesPanel] 이동할 원본 파일이 사라졌습니다 (재시도 루프 내 확인): {targetFile}");
                                 }
                                 return null;
+                            }
+
+                            // [추가] 목적지 파일 덮어쓰기 에러 방지 선행 삭제
+                            if (File.Exists(newPath))
+                            {
+                                try { File.Delete(newPath); } catch { }
                             }
 
                             File.Move(targetFile, newPath);
