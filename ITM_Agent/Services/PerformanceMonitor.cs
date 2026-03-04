@@ -277,7 +277,6 @@ namespace ITM_Agent.Services
                     logManager.LogError($"[HardwareSampler] Failed to reopen computer sensors: {ex.Message}");
                 }
 
-                // _sensorInfoLogged = false; // 필요 시 주석 해제하여 디버그 로그 다시 기록
                 timer = new Timer(_ => Sample(), null, 0, interval);
             }
             else
@@ -300,10 +299,10 @@ namespace ITM_Agent.Services
             catch { /* Ignore */ }
         }
 
-
         private void Sample()
         {
             if (!_isInitialized) return;
+            if (computer == null || computer.Hardware == null) return; // 방어 코드 추가
 
             float cpuUsage = 0, memUsage = 0, cpuTemp = 0, gpuTemp = 0;
             int fanRpm = 0;
@@ -317,19 +316,35 @@ namespace ITM_Agent.Services
                     sensorInfo.AppendLine("[HardwareSampler] Detected Sensors (Logged Once):");
                     foreach (var hardware in computer.Hardware)
                     {
+                        if (hardware == null) continue; // 방어 코드
                         hardware.Update();
                         sensorInfo.AppendLine($"  Hardware: {hardware.Name} ({hardware.HardwareType})");
-                        foreach (var sensor in hardware.Sensors)
+                        
+                        if (hardware.Sensors != null)
                         {
-                            sensorInfo.AppendLine($"    Sensor: {sensor.Name} ({sensor.SensorType}) - Value: {sensor.Value}");
-                        }
-                        foreach (var subHardware in hardware.SubHardware)
-                        {
-                            subHardware.Update();
-                            sensorInfo.AppendLine($"    SubHardware: {subHardware.Name} ({subHardware.HardwareType})");
-                            foreach (var sensor in subHardware.Sensors)
+                            foreach (var sensor in hardware.Sensors)
                             {
-                                sensorInfo.AppendLine($"      Sensor: {sensor.Name} ({sensor.SensorType}) - Value: {sensor.Value}");
+                                if (sensor != null)
+                                    sensorInfo.AppendLine($"    Sensor: {sensor.Name} ({sensor.SensorType}) - Value: {sensor.Value}");
+                            }
+                        }
+
+                        if (hardware.SubHardware != null)
+                        {
+                            foreach (var subHardware in hardware.SubHardware)
+                            {
+                                if (subHardware == null) continue;
+                                subHardware.Update();
+                                sensorInfo.AppendLine($"    SubHardware: {subHardware.Name} ({subHardware.HardwareType})");
+                                
+                                if (subHardware.Sensors != null)
+                                {
+                                    foreach (var sensor in subHardware.Sensors)
+                                    {
+                                        if (sensor != null)
+                                            sensorInfo.AppendLine($"      Sensor: {sensor.Name} ({sensor.SensorType}) - Value: {sensor.Value}");
+                                    }
+                                }
                             }
                         }
                     }
@@ -340,52 +355,66 @@ namespace ITM_Agent.Services
                 {
                     foreach (var hardware in computer.Hardware)
                     {
+                        if (hardware == null) continue;
                         hardware.Update();
-                        foreach (var subHardware in hardware.SubHardware)
+                        
+                        if (hardware.SubHardware != null)
                         {
-                            subHardware.Update();
+                            foreach (var subHardware in hardware.SubHardware)
+                            {
+                                subHardware?.Update();
+                            }
                         }
                     }
                 }
 
                 // --- 센서 값 읽기 ---
-                var cpu = computer.Hardware.FirstOrDefault(h => h.HardwareType == HardwareType.Cpu);
-                if (cpu != null)
+                var cpu = computer.Hardware.FirstOrDefault(h => h != null && h.HardwareType == HardwareType.Cpu);
+                if (cpu != null && cpu.Sensors != null)
                 {
-                    cpuUsage = cpu.Sensors.FirstOrDefault(s => s.SensorType == SensorType.Load && s.Name == "CPU Total")?.Value ?? 0;
-                    cpuTemp = cpu.Sensors.FirstOrDefault(s => s.SensorType == SensorType.Temperature && (s.Name.Contains("Package") || s.Name.Contains("Core (Tctl/Tdie)")))?.Value ??
-                              cpu.Sensors.FirstOrDefault(s => s.SensorType == SensorType.Temperature)?.Value ?? 0;
+                    cpuUsage = cpu.Sensors.FirstOrDefault(s => s != null && s.SensorType == SensorType.Load && s.Name == "CPU Total")?.Value ?? 0;
+                    cpuTemp = cpu.Sensors.FirstOrDefault(s => s != null && s.SensorType == SensorType.Temperature && (s.Name.Contains("Package") || s.Name.Contains("Core (Tctl/Tdie)")))?.Value ??
+                              cpu.Sensors.FirstOrDefault(s => s != null && s.SensorType == SensorType.Temperature)?.Value ?? 0;
                 }
 
-                var memory = computer.Hardware.FirstOrDefault(h => h.HardwareType == HardwareType.Memory);
-                if (memory != null)
+                var memory = computer.Hardware.FirstOrDefault(h => h != null && h.HardwareType == HardwareType.Memory);
+                if (memory != null && memory.Sensors != null)
                 {
-                    var memoryLoad = memory.Sensors.FirstOrDefault(s => s.SensorType == SensorType.Load);
+                    var memoryLoad = memory.Sensors.FirstOrDefault(s => s != null && s.SensorType == SensorType.Load);
                     if (memoryLoad?.Value != null) memUsage = memoryLoad.Value.Value;
                     else
                     {
-                        var used = memory.Sensors.FirstOrDefault(s => s.SensorType == SensorType.Data && s.Name == "Memory Used")?.Value;
-                        var total = memory.Sensors.FirstOrDefault(s => s.SensorType == SensorType.Data && s.Name == "Memory Total")?.Value;
+                        var used = memory.Sensors.FirstOrDefault(s => s != null && s.SensorType == SensorType.Data && s.Name == "Memory Used")?.Value;
+                        var total = memory.Sensors.FirstOrDefault(s => s != null && s.SensorType == SensorType.Data && s.Name == "Memory Total")?.Value;
                         if (used.HasValue && total.HasValue && total > 0) memUsage = (used.Value / total.Value) * 100;
                     }
                 }
 
-                var gpu = computer.Hardware.FirstOrDefault(h => h.HardwareType == HardwareType.GpuAmd || h.HardwareType == HardwareType.GpuNvidia);
-                if (gpu != null)
+                var gpu = computer.Hardware.FirstOrDefault(h => h != null && (h.HardwareType == HardwareType.GpuAmd || h.HardwareType == HardwareType.GpuNvidia));
+                if (gpu != null && gpu.Sensors != null)
                 {
-                    gpuTemp = gpu.Sensors.FirstOrDefault(s => s.SensorType == SensorType.Temperature && (s.Name.Contains("Core") || s.Name.Contains("Temp")))?.Value ??
-                              gpu.Sensors.FirstOrDefault(s => s.SensorType == SensorType.Temperature)?.Value ?? 0;
+                    gpuTemp = gpu.Sensors.FirstOrDefault(s => s != null && s.SensorType == SensorType.Temperature && (s.Name.Contains("Core") || s.Name.Contains("Temp")))?.Value ??
+                              gpu.Sensors.FirstOrDefault(s => s != null && s.SensorType == SensorType.Temperature)?.Value ?? 0;
                 }
 
-                var allSensors = computer.Hardware.SelectMany(h => h.Sensors.Concat(h.SubHardware.SelectMany(sh => sh.Sensors)));
-                var cpuFanSensor = allSensors.FirstOrDefault(s => s.SensorType == SensorType.Fan && (s.Name.Contains("CPU") || s.Name.Equals("Fan #1", StringComparison.OrdinalIgnoreCase) || s.Name.Contains("System Fan")));
-                fanRpm = (int)(cpuFanSensor?.Value ?? allSensors.FirstOrDefault(s => s.SensorType == SensorType.Fan)?.Value ?? 0);
+                // 안전한 모든 센서 추출 LINQ 구문 적용
+                var allSensors = computer.Hardware
+                    .Where(h => h != null)
+                    .SelectMany(h =>
+                    {
+                        var hSensors = h.Sensors ?? Enumerable.Empty<ISensor>();
+                        var shSensors = h.SubHardware != null
+                            ? h.SubHardware.Where(sh => sh != null && sh.Sensors != null).SelectMany(sh => sh.Sensors)
+                            : Enumerable.Empty<ISensor>();
+                        return hSensors.Concat(shSensors);
+                    });
 
-                // --- [수정] 실패 감지 및 자동 복구 로직 개선 ---
-                // 기존: 온도가 0이면 return하여 데이터를 버림 -> 수정: 온도 0이어도 진행
+                var cpuFanSensor = allSensors.FirstOrDefault(s => s != null && s.SensorType == SensorType.Fan && (s.Name.Contains("CPU") || s.Name.Equals("Fan #1", StringComparison.OrdinalIgnoreCase) || s.Name.Contains("System Fan")));
+                fanRpm = (int)(cpuFanSensor?.Value ?? allSensors.FirstOrDefault(s => s != null && s.SensorType == SensorType.Fan)?.Value ?? 0);
+
+                // --- 실패 감지 및 자동 복구 로직 ---
                 bool hasCpuError = cpuUsage == 0;
                 bool hasMemError = memUsage == 0;
-                // hasTempError 변수 제거 또는 로직에서 제외
 
                 // CPU와 메모리가 둘 다 0일 때만 심각한 오류로 판단
                 if (hasCpuError && hasMemError)
@@ -449,7 +478,7 @@ namespace ITM_Agent.Services
                     logManager.LogDebug($"[HardwareSampler] Failed to get process list: {procEx.Message}");
                 }
 
-                // --- 이벤트 발생 (온도가 0이어도 발생함) ---
+                // --- 이벤트 발생 ---
                 OnSample?.Invoke(new Metric(cpuUsage, memUsage, cpuTemp, gpuTemp, fanRpm, topProcesses));
 
                 bool isOver = (cpuUsage > 75f) || (memUsage > 80f);
