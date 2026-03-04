@@ -677,8 +677,8 @@ namespace ITM_Agent.ucPanel
             }
 
             var baselineData = new Dictionary<string, (string, string, string)>();
-            // [수정] C\d+W\d+ 로 수정하여 두자리수 슬롯 지원 (C10W22 등)
-            var regex = new Regex(@"(\d{8}_\d{6})_(.+?)_(C\d+W\d+)", RegexOptions.IgnoreCase);
+            // [수정] C\dW\d+ 로 수정하여 두자리수 슬롯 지원 (C1W22 등)
+            var regex = new Regex(@"(\d{8}_\d{6})_(.+?)_(C\dW\d+)", RegexOptions.IgnoreCase);
 
             foreach (var file in files)
             {
@@ -713,7 +713,7 @@ namespace ITM_Agent.ucPanel
             if (!fileName.Contains("_#1_")) return null; // _#1_ 이 없으면 변경 불필요
 
             var sortedData = baselineData.Values.OrderByDescending(d => d.TimeInfo).ToList();
-            
+
             // 특수문자가 제거된 파일명(비교용)
             string cleanFileName = Regex.Replace(fileName, @"[^a-zA-Z0-9]", "").ToUpperInvariant();
 
