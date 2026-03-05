@@ -429,6 +429,16 @@ namespace ITM_Agent.ucPanel
                     Thread.Sleep(delayMilliseconds);
                     retries++;
                 }
+                catch (UnauthorizedAccessException) // [핵심 방어] 권한 오류로 전체 루프 파괴 방지
+                {
+                    logManager.LogError($"[ucOverrideNamesPanel] 파일 접근 권한 거부 (파일 격리): {filePath}");
+                    return false;
+                }
+                catch (Exception ex) // [핵심 방어] 예기치 않은 예외로 인한 루프 파괴 방지
+                {
+                    logManager.LogError($"[ucOverrideNamesPanel] 파일 접근 중 예기치 않은 오류: {ex.Message}");
+                    return false;
+                }
             }
             return false;
         }
@@ -559,31 +569,46 @@ namespace ITM_Agent.ucPanel
                     var targetFiles = Directory.GetFiles(targetFolder);
                     foreach (var targetFile in targetFiles)
                     {
-                        string newFileName = ProcessTargetFile(targetFile, baselineData);
-                        if (!string.IsNullOrEmpty(newFileName))
+                        // [핵심 방어벽] 문제의 독사과(단일 에러 파일)가 루프를 파괴하지 못하도록 내부에 try-catch 배치
+                        try
                         {
-                            string newFilePath = Path.Combine(targetFolder, newFileName);
-
-                            try
+                            string newFileName = ProcessTargetFile(targetFile, baselineData);
+                            if (!string.IsNullOrEmpty(newFileName))
                             {
-                                if (!File.Exists(targetFile))
+                                string newFilePath = Path.Combine(targetFolder, newFileName);
+
+                                try
                                 {
-                                    if (settingsManager.IsDebugMode)
-                                        logManager.LogDebug($"[ucOverrideNamesPanel] 원본 파일을 찾을 수 없어 건너뜁니다: {targetFile}");
-                                    continue;
-                                }
+                                    if (!File.Exists(targetFile))
+                                    {
+                                        if (settingsManager.IsDebugMode)
+                                            logManager.LogDebug($"[ucOverrideNamesPanel] 원본 파일을 찾을 수 없어 건너뜁니다: {targetFile}");
+                                        continue;
+                                    }
 
-                                File.Move(targetFile, newFilePath);
-                                LogFileRename(targetFile, newFilePath);
+                                    // [추가] 목적지 파일 덮어쓰기 에러 방지 선행 삭제
+                                    if (File.Exists(newFilePath))
+                                    {
+                                        try { File.Delete(newFilePath); } catch { }
+                                    }
+
+                                    File.Move(targetFile, newFilePath);
+                                    LogFileRename(targetFile, newFilePath);
+                                }
+                                catch (IOException ioEx)
+                                {
+                                    logManager.LogError($"[ucOverrideNamesPanel] 파일 이동 중 오류 발생: {ioEx.Message}\n파일: {targetFile}");
+                                }
+                                catch (Exception ex)
+                                {
+                                    logManager.LogError($"[ucOverrideNamesPanel] 예기치 않은 오류 발생: {ex.Message}\n파일: {targetFile}");
+                                }
                             }
-                            catch (IOException ioEx)
-                            {
-                                logManager.LogError($"[ucOverrideNamesPanel] 파일 이동 중 오류 발생: {ioEx.Message}\n파일: {targetFile}");
-                            }
-                            catch (Exception ex)
-                            {
-                                logManager.LogError($"[ucOverrideNamesPanel] 예기치 않은 오류 발생: {ex.Message}\n파일: {targetFile}");
-                            }
+                        }
+                        catch (Exception innerEx)
+                        {
+                            // 오류가 나도 로그만 남기고 루프는 정상적으로 다음 파일로 진행됨
+                            logManager.LogError($"[ucOverrideNamesPanel] OnBaselineFileChanged 개별 파일 오류 무시됨: {innerEx.Message}");
                         }
                     }
                 }
@@ -677,8 +702,8 @@ namespace ITM_Agent.ucPanel
             }
 
             var baselineData = new Dictionary<string, (string, string, string)>();
-            // [수정] C\dW\d+ 로 수정하여 두자리수 슬롯 지원 (C1W22 등)
-            var regex = new Regex(@"(\d{8}_\d{6})_(.+?)_(C\dW\d+)", RegexOptions.IgnoreCase);
+            // [개선] C\d+W\d+ 로 수정하여 두자리수 슬롯 완벽 지원 (C10W22 등)
+            var regex = new Regex(@"(\d{8}_\d{6})_(.+?)_(C\d+W\d+)", RegexOptions.IgnoreCase);
 
             foreach (var file in files)
             {
@@ -780,6 +805,10 @@ namespace ITM_Agent.ucPanel
                             {
                                 logManager.LogDebug($"[ucOverrideNamesPanel] 파일 이동 시 원본 파일을 찾을 수 없음 (FileNotFoundException): {fileName}");
                             }
+                            return null;
+                        }
+                        catch (UnauthorizedAccessException) // [핵심 방어] 권한 에러 격리
+                        {
                             return null;
                         }
                         catch (IOException) when (i < maxRetries - 1)
@@ -917,15 +946,24 @@ namespace ITM_Agent.ucPanel
 
                     foreach (var targetFile in Directory.GetFiles(targetFolder))
                     {
-                        if (targetFile.Contains("_#1_"))
+                        // [핵심 방어벽] 문제의 독사과(단일 에러 파일)가 루프를 파괴하지 못하도록 내부에 try-catch 배치
+                        try
                         {
-                            string newFileName = ProcessTargetFile(targetFile, baselineData);
-                            if (string.IsNullOrEmpty(newFileName))
-                                continue;
+                            if (targetFile.Contains("_#1_"))
+                            {
+                                string newFileName = ProcessTargetFile(targetFile, baselineData);
+                                if (string.IsNullOrEmpty(newFileName))
+                                    continue;
 
-                            string originalName = Path.GetFileName(targetFile);
-                            if (newFileName.Equals(originalName, StringComparison.Ordinal))
-                                continue;
+                                string originalName = Path.GetFileName(targetFile);
+                                if (newFileName.Equals(originalName, StringComparison.Ordinal))
+                                    continue;
+                            }
+                        }
+                        catch (Exception innerEx)
+                        {
+                            // 오류가 나도 로그만 남기고 루프는 정상적으로 다음 파일로 진행됨
+                            logManager.LogError($"[ucOverrideNamesPanel] 개별 파일({Path.GetFileName(targetFile)}) 처리 중 무시된 오류: {innerEx.Message}");
                         }
                     }
                 }
