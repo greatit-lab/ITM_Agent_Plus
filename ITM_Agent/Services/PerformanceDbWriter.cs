@@ -76,6 +76,7 @@ namespace ITM_Agent.Services
                     conn.Open();
                     using (var tx = conn.BeginTransaction())
                     {
+                        // eqp_perf 테이블 INSERT
                         using (var cmd = conn.CreateCommand())
                         {
                             cmd.Transaction = tx;
@@ -115,14 +116,14 @@ namespace ITM_Agent.Services
                             }
                         }
 
-                        // ▼▼▼ eqp_proc_perf 테이블 INSERT 로직 수정 ▼▼▼
+                        // eqp_proc_perf 테이블 INSERT 로직 수정
                         using (var cmd = conn.CreateCommand())
                         {
                             cmd.Transaction = tx;
-                            // SQL 쿼리에 shared_memory_mb 컬럼 추가
+                            // SQL 쿼리에 memory_commit_mb 컬럼 추가
                             cmd.CommandText =
-                                "INSERT INTO public.eqp_proc_perf (eqpid, ts, serv_ts, process_name, memory_usage_mb, shared_memory_mb) " + // 컬럼 추가
-                                " VALUES (@eqp, @ts, @srv, @proc_name, @mem_mb, @shared_mem_mb) " + // 파라미터 추가
+                                "INSERT INTO public.eqp_proc_perf (eqpid, ts, serv_ts, process_name, memory_usage_mb, shared_memory_mb, memory_commit_mb) " + 
+                                " VALUES (@eqp, @ts, @srv, @proc_name, @mem_mb, @shared_mem_mb, @commit_mb) " + 
                                 " ON CONFLICT (eqpid, ts, process_name) DO NOTHING;";
 
                             var pEqp = cmd.Parameters.Add("@eqp", NpgsqlTypes.NpgsqlDbType.Varchar);
@@ -130,8 +131,8 @@ namespace ITM_Agent.Services
                             var pSrv = cmd.Parameters.Add("@srv", NpgsqlTypes.NpgsqlDbType.Timestamp);
                             var pProcName = cmd.Parameters.Add("@proc_name", NpgsqlTypes.NpgsqlDbType.Varchar);
                             var pMemMb = cmd.Parameters.Add("@mem_mb", NpgsqlTypes.NpgsqlDbType.Integer);
-                            // shared_memory_mb 파라미터 추가
-                            var pSharedMemMb = cmd.Parameters.Add("@shared_mem_mb", NpgsqlTypes.NpgsqlDbType.Integer); // 파라미터 추가
+                            var pSharedMemMb = cmd.Parameters.Add("@shared_mem_mb", NpgsqlTypes.NpgsqlDbType.Integer); 
+                            var pCommitMb = cmd.Parameters.Add("@commit_mb", NpgsqlTypes.NpgsqlDbType.Integer); // 신규 파라미터 추가
 
                             foreach (var m in batch)
                             {
@@ -150,16 +151,15 @@ namespace ITM_Agent.Services
                                     pSrv.Value = srv;
 
                                     pProcName.Value = proc.ProcessName;
-                                    // memory_usage_mb 에는 Private Working Set 값을 저장
-                                    pMemMb.Value = (int)proc.MemoryUsageMB;
-                                    // shared_memory_mb 에는 계산된 공유 메모리 값을 저장
-                                    pSharedMemMb.Value = (int)proc.SharedMemoryUsageMB; // 값 할당 추가
+                                    
+                                    pMemMb.Value = (int)proc.MemoryUsageMB;             // Private Working Set 
+                                    pSharedMemMb.Value = (int)proc.SharedMemoryUsageMB; // Shared Memory
+                                    pCommitMb.Value = (int)proc.CommitMemoryMB;         // Commit Size (신규)
 
                                     cmd.ExecuteNonQuery();
                                 }
                             }
                         }
-                        // ▲▲▲ eqp_proc_perf 테이블 INSERT 로직 수정 끝 ▲▲▲
 
                         tx.Commit(); // 모든 작업이 성공하면 커밋
                     }
