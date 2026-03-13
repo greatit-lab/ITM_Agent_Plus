@@ -8,15 +8,16 @@ using System.Linq;
 using System.Security.Principal;
 using System.Text;
 using System.Threading;
-using System.Runtime.InteropServices; // [추가] OS 메모리 Trim API 사용
+using System.Runtime.InteropServices; // OS 메모리 Trim API 사용
 
 namespace ITM_Agent.Services
 {
     public sealed class ProcessMetric
     {
         public string ProcessName { get; set; }
-        public long MemoryUsageMB { get; set; } // Private Working Set (Private Bytes)
+        public long MemoryUsageMB { get; set; }       // Private Working Set (작업 관리자 수치)
         public long SharedMemoryUsageMB { get; set; } // 공유 메모리 사용량
+        public long CommitMemoryMB { get; set; }      // (신규 추가) Commit Size
     }
 
     public sealed class PerformanceMonitor
@@ -35,7 +36,7 @@ namespace ITM_Agent.Services
         private bool sampling;
         private bool fileLoggingEnabled;
 
-        // [추가] OS 레벨 워킹셋(Working Set) 메모리 반환 API
+        // OS 레벨 워킹셋(Working Set) 메모리 반환 API
         [DllImport("kernel32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool SetProcessWorkingSetSize(IntPtr process, UIntPtr minimumWorkingSetSize, UIntPtr maximumWorkingSetSize);
@@ -145,11 +146,11 @@ namespace ITM_Agent.Services
             }
             buffer.Clear();
 
-            // [추가] 백그라운드 데이터 Flush 완료 후, OS에 잉여 메모리(Working Set) 강제 반환하여 메모리 점유율 최적화
+            // 백그라운드 데이터 Flush 완료 후, OS에 잉여 메모리(Working Set) 강제 반환하여 메모리 점유율 최적화
             TrimMemory();
         }
 
-        // [추가] 주기적인 메모리 정리 헬퍼 메서드
+        // 주기적인 메모리 정리 헬퍼 메서드
         private static void TrimMemory()
         {
             try
@@ -439,7 +440,6 @@ namespace ITM_Agent.Services
                 bool hasCpuError = cpuUsage == 0;
                 bool hasMemError = memUsage == 0;
 
-                // CPU와 메모리가 둘 다 0일 때만 심각한 오류로 판단
                 if (hasCpuError && hasMemError)
                 {
                     _consecutiveFailures++;
@@ -466,12 +466,11 @@ namespace ITM_Agent.Services
                             _isInitialized = false;
                         }
                     }
-                    return; // 정말 아무것도 못 읽었을 때만 리턴
+                    return; 
                 }
                 _consecutiveFailures = 0;
 
                 // --- Top 5 프로세스 정보 수집 ---
-                // --- [최적화] 무거운 LINQ 정렬 구문을 C# 네이티브 List 기반으로 교체하여 메모리 가비지(Allocation) 최소화 ---
                 var topProcesses = new List<ProcessMetric>(5);
                 try
                 {
@@ -495,15 +494,31 @@ namespace ITM_Agent.Services
                         int takeCount = Math.Min(5, procInfos.Count);
                         for (int i = 0; i < takeCount; i++)
                         {
-                            long privateMB = procInfos[i].PrivateMem / (1024 * 1024);
+                            long commitMB = procInfos[i].PrivateMem / (1024 * 1024); // 기존에 수집하던 커밋 크기
                             long workingMB = procInfos[i].WorkingSet / (1024 * 1024);
-                            long sharedMB = workingMB > privateMB ? workingMB - privateMB : 0;
+                            long sharedMB = workingMB > commitMB ? workingMB - commitMB : 0;
+                            
+                            long privateWorkingSetMB = 0;
+                            try
+                            {
+                                // 사용자용 Private Working Set 수집
+                                using (PerformanceCounter pc = new PerformanceCounter("Process", "Working Set - Private", procInfos[i].Name, true))
+                                {
+                                    privateWorkingSetMB = pc.RawValue / (1024 * 1024);
+                                }
+                            }
+                            catch
+                            {
+                                // 프로세스 종료 등 예외 발생 시 안전을 위해 기본 WorkingSet으로 대체
+                                privateWorkingSetMB = workingMB; 
+                            }
 
                             topProcesses.Add(new ProcessMetric
                             {
                                 ProcessName = procInfos[i].Name,
-                                MemoryUsageMB = privateMB,
-                                SharedMemoryUsageMB = sharedMB
+                                MemoryUsageMB = privateWorkingSetMB,    // 기존 컬럼 매핑: Private Working Set
+                                SharedMemoryUsageMB = sharedMB,
+                                CommitMemoryMB = commitMB               // 신규 컬럼 매핑: Commit Size
                             });
                         }
                     }
