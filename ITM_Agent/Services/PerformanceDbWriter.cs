@@ -122,8 +122,8 @@ namespace ITM_Agent.Services
                             cmd.Transaction = tx;
                             // SQL 쿼리에 memory_commit_mb 컬럼 추가
                             cmd.CommandText =
-                                "INSERT INTO public.eqp_proc_perf (eqpid, ts, serv_ts, process_name, memory_usage_mb, shared_memory_mb, memory_commit_mb) " + 
-                                " VALUES (@eqp, @ts, @srv, @proc_name, @mem_mb, @shared_mem_mb, @commit_mb) " + 
+                                "INSERT INTO public.eqp_proc_perf (eqpid, ts, serv_ts, process_name, memory_usage_mb, shared_memory_mb, memory_commit_mb) " +
+                                " VALUES (@eqp, @ts, @srv, @proc_name, @mem_mb, @shared_mem_mb, @commit_mb) " +
                                 " ON CONFLICT (eqpid, ts, process_name) DO NOTHING;";
 
                             var pEqp = cmd.Parameters.Add("@eqp", NpgsqlTypes.NpgsqlDbType.Varchar);
@@ -131,7 +131,7 @@ namespace ITM_Agent.Services
                             var pSrv = cmd.Parameters.Add("@srv", NpgsqlTypes.NpgsqlDbType.Timestamp);
                             var pProcName = cmd.Parameters.Add("@proc_name", NpgsqlTypes.NpgsqlDbType.Varchar);
                             var pMemMb = cmd.Parameters.Add("@mem_mb", NpgsqlTypes.NpgsqlDbType.Integer);
-                            var pSharedMemMb = cmd.Parameters.Add("@shared_mem_mb", NpgsqlTypes.NpgsqlDbType.Integer); 
+                            var pSharedMemMb = cmd.Parameters.Add("@shared_mem_mb", NpgsqlTypes.NpgsqlDbType.Integer);
                             var pCommitMb = cmd.Parameters.Add("@commit_mb", NpgsqlTypes.NpgsqlDbType.Integer); // 신규 파라미터 추가
 
                             foreach (var m in batch)
@@ -151,7 +151,7 @@ namespace ITM_Agent.Services
                                     pSrv.Value = srv;
 
                                     pProcName.Value = proc.ProcessName;
-                                    
+
                                     pMemMb.Value = (int)proc.MemoryUsageMB;             // Private Working Set 
                                     pSharedMemMb.Value = (int)proc.SharedMemoryUsageMB; // Shared Memory
                                     pCommitMb.Value = (int)proc.CommitMemoryMB;         // Commit Size (신규)
