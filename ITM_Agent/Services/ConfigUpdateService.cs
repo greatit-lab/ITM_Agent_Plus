@@ -26,6 +26,7 @@ namespace ITM_Agent.Services
     /// <summary>
     /// 논의된 '안정성을 극대화한 시나리오'를 구현하는 핵심 서비스.
     /// (DB 테이블 폴링, Connection.ini 갱신, Stop/Run 트리거, 완료 보고)
+    /// 내부망 Proxy 환경에서도 원래의 목적지 IP와 Proxy 정보를 정확히 분리하여 보고합니다.
     /// </summary>
     public class ConfigUpdateService : IDisposable
     {
@@ -59,6 +60,35 @@ namespace ITM_Agent.Services
         }
 
         /// <summary>
+        /// cfg_server 테이블에 새로운 컬럼(use_proxy, proxy_ip)이 없으면 자동으로 추가합니다.
+        /// </summary>
+        private async Task EnsureSchemaAsync(NpgsqlConnection conn)
+        {
+            const string schemaSql = @"
+                DO $$ 
+                BEGIN 
+                    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='cfg_server' AND column_name='use_proxy') THEN
+                        ALTER TABLE public.cfg_server ADD COLUMN use_proxy VARCHAR(5) DEFAULT 'N';
+                    END IF;
+                    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='cfg_server' AND column_name='proxy_ip') THEN
+                        ALTER TABLE public.cfg_server ADD COLUMN proxy_ip VARCHAR(50);
+                    END IF;
+                END $$;";
+            
+            try
+            {
+                using (var cmd = new NpgsqlCommand(schemaSql, conn))
+                {
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logManager.LogDebug($"[ConfigUpdateService] EnsureSchemaAsync skipped or failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// (1~3단계) (구)DB의 cfg_server를 주기적으로 폴링하여 상태를 보고하고,
         /// update_flag='yes'를 감지합니다.
         /// </summary>
@@ -67,13 +97,13 @@ namespace ITM_Agent.Services
             _logManager.LogDebug("[ConfigUpdateService] Polling cfg_server for updates...");
 
             string updateFlag = null;
-            string cs; // (구)DB 연결 문자열
+            string cs; // DB 접속용 연결 문자열 (Proxy가 적용되었다면 Proxy 주소)
 
             try
             {
-                // (1) Connection.ini의 현재 (구)DB 정보로 접속
                 try
                 {
+                    // (1) DatabaseInfo를 통해 현재 연결 문자열 확보
                     cs = DatabaseInfo.CreateDefault().GetConnectionString();
                 }
                 catch (Exception ex)
@@ -82,55 +112,45 @@ namespace ITM_Agent.Services
                     return;
                 }
 
+                // 2. Connection.ini를 직접 복호화하여 '순수 원본 IP(최종 목적지)' 추출
+                string originalDbHost = GetOriginalDbHost();
+                string originalFtpHost = GetOriginalFtpHost();
+
+                // 3. Settings.ini를 읽어 Proxy(내부망) 사용 여부 및 IP 확인 (SettingsManager 활용 최적화)
+                string useProxy = _settingsManager.GetValueFromSection("Network", "UseProxy") == "1" ? "Y" : "N";
+                string proxyIp = _settingsManager.GetValueFromSection("Network", "ProxyIP");
+                if (useProxy == "N") proxyIp = null;
+
                 using (var conn = new NpgsqlConnection(cs))
                 {
                     await conn.OpenAsync();
+                    await EnsureSchemaAsync(conn); // 스키마 자동 점검
 
-                    // [수정] 밀리초 제거를 위해 C#에서 정제된 시간을 생성하여 파라미터로 전달
+                    // 밀리초 제거를 위해 C#에서 정제된 시간을 생성하여 파라미터로 전달
                     DateTime now = DateTime.Now;
                     DateTime cleanTime = new DateTime(now.Year, now.Month, now.Day, now.Hour, now.Minute, now.Second);
 
                     // (2) cfg_server 테이블에서 내 EQPID 정보 조회 (최초 자동 등록 및 하트비트)
-                    // [수정] update 컬럼에 @update_time 파라미터 사용
                     const string sqlPoll = @"
-                        INSERT INTO public.cfg_server (eqpid, agent_db_host, agent_ftp_host, update_flag, ""update"")
-                        VALUES (@eqpid, @db_host, @ftp_host, 'no', @update_time)
+                        INSERT INTO public.cfg_server (eqpid, agent_db_host, agent_ftp_host, update_flag, ""update"", use_proxy, proxy_ip)
+                        VALUES (@eqpid, @db_host, @ftp_host, 'no', @update_time, @use_proxy, @proxy_ip)
                         ON CONFLICT (eqpid) DO UPDATE
                         SET 
                             agent_db_host = EXCLUDED.agent_db_host,
                             agent_ftp_host = EXCLUDED.agent_ftp_host,
+                            use_proxy = EXCLUDED.use_proxy,
+                            proxy_ip = EXCLUDED.proxy_ip,
                             ""update"" = @update_time
                         RETURNING update_flag;";
-
-                    // Connection.ini에서 현재 설정 읽기
-                    string iniDbHost = GetHostFromConnectionString(cs);
-
-                    // FtpsInfo.CreateDefault()를 호출하여 FTP 호스트 가져오기
-                    string iniFtpHost = "N/A"; // (기본값)
-                    try
-                    {
-                        // FtpsInfo 인스턴스 생성을 시도하여 Host 속성을 바로 읽어옴
-                        iniFtpHost = FtpsInfo.CreateDefault().Host;
-                        if (string.IsNullOrEmpty(iniFtpHost))
-                        {
-                            iniFtpHost = "N/A";
-                            _logManager.LogEvent("[ConfigUpdateService] FtpsInfo.Host is null or empty.");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        // (ConnectInfo.dll이 [Ftps] Config를 읽거나 복호화/파싱하다 실패한 경우)
-                        _logManager.LogError($"[ConfigUpdateService] Failed to get FTP Host from FtpsInfo: {ex.Message}");
-                        iniFtpHost = "N/A"; // (실패 시 N/A 유지)
-                    }
 
                     using (var cmd = new NpgsqlCommand(sqlPoll, conn))
                     {
                         cmd.Parameters.AddWithValue("@eqpid", _eqpid);
-                        cmd.Parameters.AddWithValue("@db_host", iniDbHost);
-                        cmd.Parameters.AddWithValue("@ftp_host", iniFtpHost);
-                        // [수정] 정제된 cleanTime 전달
+                        cmd.Parameters.AddWithValue("@db_host", originalDbHost ?? "N/A");
+                        cmd.Parameters.AddWithValue("@ftp_host", originalFtpHost ?? "N/A");
                         cmd.Parameters.AddWithValue("@update_time", cleanTime);
+                        cmd.Parameters.AddWithValue("@use_proxy", useProxy);
+                        cmd.Parameters.AddWithValue("@proxy_ip", proxyIp ?? (object)DBNull.Value);
 
                         updateFlag = (string)await cmd.ExecuteScalarAsync();
                     }
@@ -156,7 +176,6 @@ namespace ITM_Agent.Services
         /// <summary>
         /// (4~7단계) update_flag='yes' 감지 시, (구)DB에서 (신)DB 정보를 가져와
         /// Connection.ini를 암호화하여 갱신하고, Agent의 Stop/Run 사이클을 트리거합니다.
-        /// (요청하신 v2 스키마 및 v2 Config 형식 적용)
         /// </summary>
         private async Task PerformUpdateProcessAsync(string oldConnectionString)
         {
@@ -200,7 +219,6 @@ namespace ITM_Agent.Services
                 _logManager.LogDebug("[ConfigUpdateService] Fetched new config from cfg_new_server.");
 
                 // 2. 새 평문 정보로 (신)DB 연결 문자열 및 (신)FTP JSON 생성
-                // (DB 이름은 기존과 동일하다고 가정)
                 string dbName = new NpgsqlConnectionStringBuilder(oldConnectionString).Database;
 
                 var csBuilder = new NpgsqlConnectionStringBuilder
@@ -208,7 +226,7 @@ namespace ITM_Agent.Services
                     Host = newDbHost,
                     Port = newDbPort,
                     Username = newDbUser,
-                    Password = newDbPw, // (평문 암호 포함)
+                    Password = newDbPw, 
                     Database = dbName,
                     Encoding = "UTF8",
                     SslMode = SslMode.Disable,
@@ -221,7 +239,7 @@ namespace ITM_Agent.Services
                     Host = newFtpHost,
                     Port = newFtpPort,
                     Username = newFtpUser,
-                    Password = newFtpPw // (평문 암호 포함)
+                    Password = newFtpPw 
                 };
                 string ftpConfigString = JsonConvert.SerializeObject(ftpConfig);
 
@@ -269,43 +287,47 @@ namespace ITM_Agent.Services
             {
                 // (8) (신)DB에 접속
                 string newCs = DatabaseInfo.CreateDefault().GetConnectionString();
-                string newDbHost = GetHostFromConnectionString(newCs);
-                string newFtpHost = "N/A";
-                try
-                {
-                    // (Connection.ini가 방금 바뀌었으므로 FtpsInfo.CreateDefault()를 다시 호출)
-                    newFtpHost = FtpsInfo.CreateDefault().Host;
-                }
-                catch { }
+                
+                // 업데이트 후, 바뀐 Connection.ini에서 원본 IP 다시 추출
+                string newDbHost = GetOriginalDbHost();
+                string newFtpHost = GetOriginalFtpHost();
 
-                _logManager.LogEvent($"[ConfigUpdateService] Confirming update success to NEW DB ({newDbHost})...");
+                // SettingsManager 활용 최적화
+                string useProxy = _settingsManager.GetValueFromSection("Network", "UseProxy") == "1" ? "Y" : "N";
+                string proxyIp = _settingsManager.GetValueFromSection("Network", "ProxyIP");
+                if (useProxy == "N") proxyIp = null;
+
+                _logManager.LogEvent($"[ConfigUpdateService] Confirming update success to NEW DB (Real Host: {newDbHost})...");
 
                 using (var conn = new NpgsqlConnection(newCs))
                 {
                     await conn.OpenAsync();
+                    await EnsureSchemaAsync(conn);
 
-                    // [수정] 밀리초 제거된 cleanTime 사용
+                    // 밀리초 제거된 cleanTime 사용
                     DateTime now = DateTime.Now;
                     DateTime cleanTime = new DateTime(now.Year, now.Month, now.Day, now.Hour, now.Minute, now.Second);
 
                     // (9) cfg_server 테이블에 최종 상태 업데이트
-                    // [수정] update 컬럼에 @update_time 파라미터 사용
                     const string sqlConfirm = @"
                         UPDATE public.cfg_server 
                         SET 
                             agent_db_host = @db_host,
                             agent_ftp_host = @ftp_host,
+                            use_proxy = @use_proxy,
+                            proxy_ip = @proxy_ip,
                             update_flag = 'no',
                             ""update"" = @update_time
                         WHERE eqpid = @eqpid;";
 
                     using (var cmd = new NpgsqlCommand(sqlConfirm, conn))
                     {
-                        cmd.Parameters.AddWithValue("@db_host", newDbHost);
+                        cmd.Parameters.AddWithValue("@db_host", newDbHost ?? "N/A");
                         cmd.Parameters.AddWithValue("@ftp_host", newFtpHost ?? "N/A"); // (null 방지)
                         cmd.Parameters.AddWithValue("@eqpid", _eqpid);
-                        // [수정] 정제된 cleanTime 전달
                         cmd.Parameters.AddWithValue("@update_time", cleanTime);
+                        cmd.Parameters.AddWithValue("@use_proxy", useProxy);
+                        cmd.Parameters.AddWithValue("@proxy_ip", proxyIp ?? (object)DBNull.Value);
 
                         int affected = await cmd.ExecuteNonQueryAsync();
 
@@ -318,16 +340,18 @@ namespace ITM_Agent.Services
                             // (신)DB에 cfg_server 레코드가 없는 경우 (구->신 DB 마이그레이션이 안된 경우)
                             _logManager.LogEvent("[ConfigUpdateService] Update confirmation: EQPID not found in new DB's cfg_server. Attempting INSERT.");
                             const string sqlInsertConfirm = @"
-                                INSERT INTO public.cfg_server (eqpid, agent_db_host, agent_ftp_host, update_flag, ""update"")
-                                VALUES (@eqpid, @db_host, @ftp_host, 'no', @update_time)
+                                INSERT INTO public.cfg_server (eqpid, agent_db_host, agent_ftp_host, update_flag, ""update"", use_proxy, proxy_ip)
+                                VALUES (@eqpid, @db_host, @ftp_host, 'no', @update_time, @use_proxy, @proxy_ip)
                                 ON CONFLICT (eqpid) DO NOTHING;";
 
                             using (var cmdInsert = new NpgsqlCommand(sqlInsertConfirm, conn))
                             {
                                 cmdInsert.Parameters.AddWithValue("@eqpid", _eqpid);
-                                cmdInsert.Parameters.AddWithValue("@db_host", newDbHost);
+                                cmdInsert.Parameters.AddWithValue("@db_host", newDbHost ?? "N/A");
                                 cmdInsert.Parameters.AddWithValue("@ftp_host", newFtpHost ?? "N/A"); // (null 방지)
                                 cmdInsert.Parameters.AddWithValue("@update_time", cleanTime);
+                                cmdInsert.Parameters.AddWithValue("@use_proxy", useProxy);
+                                cmdInsert.Parameters.AddWithValue("@proxy_ip", proxyIp ?? (object)DBNull.Value);
                                 await cmdInsert.ExecuteNonQueryAsync();
                             }
                         }
@@ -338,6 +362,32 @@ namespace ITM_Agent.Services
             {
                 _logManager.LogError($"[ConfigUpdateService] Failed to confirm update to new DB: {ex.Message}");
             }
+        }
+
+        // --- Connection.ini 직접 파싱/복호화 (Proxy 스와핑 방지) ---
+        private string GetOriginalDbHost()
+        {
+            try
+            {
+                string encrypted = DatabaseInfo.GetIniValue("Database", "Config");
+                if (string.IsNullOrEmpty(encrypted)) return null;
+                string plain = DecryptAES(encrypted, AgentCryptoConfig.AES_COMMON_KEY);
+                return new NpgsqlConnectionStringBuilder(plain).Host;
+            }
+            catch { return null; }
+        }
+
+        private string GetOriginalFtpHost()
+        {
+            try
+            {
+                string encrypted = DatabaseInfo.GetIniValue("Ftps", "Config");
+                if (string.IsNullOrEmpty(encrypted)) return null;
+                string plain = DecryptAES(encrypted, AgentCryptoConfig.AES_COMMON_KEY);
+                var config = JsonConvert.DeserializeObject<FtpConfig>(plain);
+                return config?.Host;
+            }
+            catch { return null; }
         }
 
         // --- 헬퍼 메서드 ---
