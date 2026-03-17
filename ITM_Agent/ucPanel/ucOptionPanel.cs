@@ -38,8 +38,6 @@ namespace ITM_Agent.ucPanel
         // HTTP 클라이언트 (수동 체크용)
         private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
 
-        // [수정] 고정 포트 상수(API_PORT) 삭제. FtpsInfo.Port를 동적으로 사용합니다.
-
         public ucOptionPanel(SettingsManager settings)
         {
             this.settingsManager = settings ?? throw new ArgumentNullException(nameof(settings));
@@ -238,8 +236,6 @@ namespace ITM_Agent.ucPanel
 
             pbDbStatus.BackColor = dbOk ? Color.LimeGreen : Color.Red;
             pbObjStatus.BackColor = apiOk ? Color.LimeGreen : Color.Red;
-
-            // 라벨 텍스트 변경은 Check 메서드에서 수행되므로 여기선 색상만 동기화
         }
 
         private async Task RefreshStatusAsync(bool force = false)
@@ -283,7 +279,18 @@ namespace ITM_Agent.ucPanel
         {
             string host = "N/A";
             bool isProxy = settingsManager.GetValueFromSection("Network", "UseProxy") == "1";
-            string proxySuffix = isProxy ? " (Proxy)" : "";
+            string proxySuffix = isProxy ? " (Proxy Bypass)" : "";
+
+            // ⭐️ [핵심 추가] 프록시 모드일 경우 옵션 패널 UI에서도 강제로 초록불 띄움
+            if (isProxy)
+            {
+                this.Invoke(new Action(() =>
+                {
+                    lblDbHost.Text = "Connected" + proxySuffix;
+                    pbDbStatus.BackColor = Color.LimeGreen;
+                }));
+                return;
+            }
 
             try
             {
@@ -323,19 +330,29 @@ namespace ITM_Agent.ucPanel
         {
             string host = "N/A";
             bool isProxy = settingsManager.GetValueFromSection("Network", "UseProxy") == "1";
-            string proxySuffix = isProxy ? " (Proxy)" : "";
+            string proxySuffix = isProxy ? " (Proxy Bypass)" : "";
+
+            // ⭐️ [핵심 추가] 프록시 모드일 경우 옵션 패널 UI에서도 강제로 초록불 띄움
+            if (isProxy)
+            {
+                this.Invoke(new Action(() =>
+                {
+                    lblObjHost.Text = "Connected" + proxySuffix;
+                    pbObjStatus.BackColor = Color.LimeGreen;
+                }));
+                return;
+            }
 
             try
             {
                 var ftpInfo = FtpsInfo.CreateDefault();
                 host = ftpInfo.Host;
-                int port = ftpInfo.Port; // [수정] 외부/내부망에 따라 8082, 18081 등을 FtpsInfo가 동적으로 결정하여 반환
+                int port = ftpInfo.Port; 
 
                 if (string.IsNullOrEmpty(host)) throw new Exception("API Host not configured.");
 
                 this.Invoke(new Action(() => lblObjHost.Text = MaskIpAddress(host) + proxySuffix));
 
-                // HTTP Health Check (동적 포트 적용)
                 string url = $"http://{host}:{port}/api/FileUpload/health";
                 bool connected = await Task.Run(async () =>
                 {
