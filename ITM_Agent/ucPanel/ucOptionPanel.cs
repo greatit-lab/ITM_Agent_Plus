@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 using Npgsql;
 using ConnectInfo;
 using System.Net.Sockets;
-using System.Net.Http; 
+using System.Net.Http;
 using System.Drawing.Drawing2D;
 using System.Threading;
 
@@ -37,7 +37,7 @@ namespace ITM_Agent.ucPanel
 
         // HTTP 클라이언트 (수동 체크용)
         private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-        
+
         // [수정] 고정 포트 상수(API_PORT) 삭제. FtpsInfo.Port를 동적으로 사용합니다.
 
         public ucOptionPanel(SettingsManager settings)
