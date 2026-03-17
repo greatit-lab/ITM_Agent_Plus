@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 using Npgsql;
 using ConnectInfo;
 using System.Net.Sockets;
-using System.Net.Http; // [추가] HttpClient 사용
+using System.Net.Http; 
 using System.Drawing.Drawing2D;
 using System.Threading;
 
@@ -35,9 +35,10 @@ namespace ITM_Agent.ucPanel
         private bool _isRefreshing = false;
         private readonly object _refreshLock = new object();
 
-        // [추가] HTTP 클라이언트 (수동 체크용)
+        // HTTP 클라이언트 (수동 체크용)
         private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-        private const int API_PORT = 8082;
+        
+        // [수정] 고정 포트 상수(API_PORT) 삭제. FtpsInfo.Port를 동적으로 사용합니다.
 
         public ucOptionPanel(SettingsManager settings)
         {
@@ -227,7 +228,6 @@ namespace ITM_Agent.ucPanel
             // 사용 안 함
         }
 
-        // ▼▼▼ 외부(MainForm)에서 상태 주입 ▼▼▼
         public void SetDirectConnectionStatus(bool dbOk, bool apiOk)
         {
             if (this.InvokeRequired)
@@ -239,10 +239,8 @@ namespace ITM_Agent.ucPanel
             pbDbStatus.BackColor = dbOk ? Color.LimeGreen : Color.Red;
             pbObjStatus.BackColor = apiOk ? Color.LimeGreen : Color.Red;
 
-            lblDbHost.Text = dbOk ? "Connected" : "Disconnected";
-            lblObjHost.Text = apiOk ? "Connected" : "Disconnected";
+            // 라벨 텍스트 변경은 Check 메서드에서 수행되므로 여기선 색상만 동기화
         }
-        // ▲▲▲ 추가 끝 ▲▲▲
 
         private async Task RefreshStatusAsync(bool force = false)
         {
@@ -284,6 +282,9 @@ namespace ITM_Agent.ucPanel
         private async Task CheckDatabaseAsync()
         {
             string host = "N/A";
+            bool isProxy = settingsManager.GetValueFromSection("Network", "UseProxy") == "1";
+            string proxySuffix = isProxy ? " (Proxy)" : "";
+
             try
             {
                 string cs = DatabaseInfo.CreateDefault().GetConnectionString();
@@ -292,7 +293,7 @@ namespace ITM_Agent.ucPanel
                 if (!cs.Contains("Pooling=")) cs += ";Pooling=false";
                 cs += ";Timeout=3";
 
-                this.Invoke(new Action(() => lblDbHost.Text = MaskIpAddress(host)));
+                this.Invoke(new Action(() => lblDbHost.Text = MaskIpAddress(host) + proxySuffix));
 
                 using (var conn = new NpgsqlConnection(cs))
                 {
@@ -311,28 +312,31 @@ namespace ITM_Agent.ucPanel
                 {
                     pbDbStatus.BackColor = Color.Red;
                     if (host != "N/A" && host != "Invalid CS")
-                        lblDbHost.Text = MaskIpAddress(host);
+                        lblDbHost.Text = MaskIpAddress(host) + proxySuffix;
                     else
                         lblDbHost.Text = "Connection Failed";
                 }));
             }
         }
 
-        // [수정] FTP 연결 대신 Web API Health Check 수행
         private async Task CheckObjectStoryAsync()
         {
             string host = "N/A";
+            bool isProxy = settingsManager.GetValueFromSection("Network", "UseProxy") == "1";
+            string proxySuffix = isProxy ? " (Proxy)" : "";
+
             try
             {
                 var ftpInfo = FtpsInfo.CreateDefault();
                 host = ftpInfo.Host;
+                int port = ftpInfo.Port; // [수정] 외부/내부망에 따라 8082, 18081 등을 FtpsInfo가 동적으로 결정하여 반환
 
                 if (string.IsNullOrEmpty(host)) throw new Exception("API Host not configured.");
 
-                this.Invoke(new Action(() => lblObjHost.Text = MaskIpAddress(host)));
+                this.Invoke(new Action(() => lblObjHost.Text = MaskIpAddress(host) + proxySuffix));
 
-                // HTTP Health Check (Port 8080)
-                string url = $"http://{host}:{API_PORT}/api/FileUpload/health";
+                // HTTP Health Check (동적 포트 적용)
+                string url = $"http://{host}:{port}/api/FileUpload/health";
                 bool connected = await Task.Run(async () =>
                 {
                     try
@@ -361,7 +365,7 @@ namespace ITM_Agent.ucPanel
                 {
                     pbObjStatus.BackColor = Color.Red;
                     if (host != "N/A")
-                        lblObjHost.Text = MaskIpAddress(host);
+                        lblObjHost.Text = MaskIpAddress(host) + proxySuffix;
                     else
                         lblObjHost.Text = "Connection Failed";
                 }));
