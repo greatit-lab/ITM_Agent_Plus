@@ -269,8 +269,8 @@ namespace ITM_Agent.Services
                         {
                             // [수정] IsDBNull 체크를 추가하여 Null일 경우 안전하게 null 반환
                             currentData.Add((
-                                reader.GetString(0), 
-                                reader.IsDBNull(1) ? (int?)null : reader.GetInt32(1), 
+                                reader.GetString(0),
+                                reader.IsDBNull(1) ? (int?)null : reader.GetInt32(1),
                                 reader.IsDBNull(2) ? (DateTime?)null : reader.GetDateTime(2)
                             ));
                         }
@@ -300,7 +300,7 @@ namespace ITM_Agent.Services
                         if (pgRow.LampNo.HasValue)
                         {
                             var latestLog = mssqlLogs.Where(m => m.LampID == pgRow.LampNo.Value).OrderByDescending(m => m.LogTime).FirstOrDefault();
-                            
+
                             // [수정] Null이거나(아직 교체안됨) 새로운 로그의 시간이 더 최근일 경우
                             if (latestLog.LampID > 0 && (!pgRow.LastChanged.HasValue || latestLog.LogTime > pgRow.LastChanged.Value))
                             {
