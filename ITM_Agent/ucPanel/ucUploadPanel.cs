@@ -27,10 +27,10 @@ namespace ITM_Agent.ucPanel
         private readonly object _lockTab1 = new object();
         private readonly object _lockTab2 = new object();
 
-        private readonly ConcurrentDictionary<string, DateTime> _lastProcessEventTime =
-            new ConcurrentDictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
-        private const double DebounceSeconds = 2.0;
-        private readonly object _cleanupLock = new object();
+        // ⭐️ [핵심 추가] 이벤트 누락 방지 및 Lock 폭풍 차단을 위한 파일별 슬라이딩 윈도우 타이머
+        private readonly ConcurrentDictionary<string, System.Threading.Timer> _tab1Timers = new ConcurrentDictionary<string, System.Threading.Timer>(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, System.Threading.Timer> _tab2Timers = new ConcurrentDictionary<string, System.Threading.Timer>(StringComparer.OrdinalIgnoreCase);
+        private const int DebounceDelayMs = 1000; // 1초 대기
 
         private readonly ucConfigurationPanel _configPanel;
         private readonly ucPluginPanel _pluginPanel;
@@ -42,7 +42,6 @@ namespace ITM_Agent.ucPanel
         private readonly Dictionary<string, (string Task, string Filter, bool RequiresOverride)> _pluginMetadataCache =
             new Dictionary<string, (string Task, string Filter, bool RequiresOverride)>(StringComparer.OrdinalIgnoreCase);
 
-        // 플러그인 런타임 캐시 추가 (메모리 누수 방지용)
         private readonly ConcurrentDictionary<string, PluginRuntimeInfo> _pluginRuntimeCache =
             new ConcurrentDictionary<string, PluginRuntimeInfo>(StringComparer.OrdinalIgnoreCase);
 
@@ -51,6 +50,15 @@ namespace ITM_Agent.ucPanel
             public Type ClassType { get; set; }
             public MethodInfo Method { get; set; }
             public bool RequiresThreeArgs { get; set; }
+        }
+
+        // 파일 이벤트 상태 보관용 클래스
+        private class FileEventState
+        {
+            public string FullPath { get; set; }
+            public string Name { get; set; }
+            public WatcherChangeTypes ChangeType { get; set; }
+            public string Filter { get; set; }
         }
 
         private const string Tab1Section = "[UploadRulesTab1]";
@@ -416,18 +424,26 @@ namespace ITM_Agent.ucPanel
             {
                 foreach (var w in _tab1Watchers) { w.EnableRaisingEvents = false; w.Created -= OnTab1FileEvent; w.Renamed -= OnTab1FileEvent; w.Changed -= OnTab1FileEvent; w.Dispose(); }
                 _tab1Watchers.Clear(); _tab1RuleMap.Clear();
+
+                // 타이머 정리
+                foreach (var t in _tab1Timers.Values) { try { t.Dispose(); } catch { } }
+                _tab1Timers.Clear();
             }
             lock (_lockTab2)
             {
                 foreach (var w in _tab2Watchers) { w.EnableRaisingEvents = false; w.Created -= OnTab2FileChanged; w.Renamed -= OnTab2FileChanged; w.Changed -= OnTab2FileChanged; w.Dispose(); }
                 _tab2Watchers.Clear(); _tab2RuleMap.Clear();
+
+                // 타이머 정리
+                foreach (var t in _tab2Timers.Values) { try { t.Dispose(); } catch { } }
+                _tab2Timers.Clear();
             }
-            _logManager.LogEvent("[ucUploadPanel] All watchers stopped.");
+            _logManager.LogEvent("[ucUploadPanel] All watchers and timers stopped.");
         }
 
         #endregion
 
-        #region --- 파일 이벤트 핸들러 ---
+        #region --- ⭐️ 타이머 기반 이벤트 처리 (Lock 폭풍 완벽 방지) ---
 
         private bool WaitForFileReady(string filePath, int timeoutSeconds = 60)
         {
@@ -438,7 +454,6 @@ namespace ITM_Agent.ucPanel
                 {
                     if (!File.Exists(filePath)) return false;
 
-                    // [핵심 개선] FileShare.None(독점 잠금) -> FileShare.ReadWrite | FileShare.Delete
                     using (var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
                     {
                         if (stream.Length >= 0) return true;
@@ -460,51 +475,57 @@ namespace ITM_Agent.ucPanel
         {
             if (e.Name.Contains("_#1_") || isPaused) return;
 
+            string fileKey = e.FullPath.ToUpperInvariant();
+            var state = new FileEventState { FullPath = e.FullPath, Name = e.Name, ChangeType = e.ChangeType };
+
+            // 이벤트가 올 때마다 타이머를 1초로 리셋. 1초간 잠잠해지면 Tab1TimerCallback 실행
+            _tab1Timers.AddOrUpdate(fileKey,
+                key => new System.Threading.Timer(Tab1TimerCallback, state, DebounceDelayMs, Timeout.Infinite),
+                (key, oldTimer) =>
+                {
+                    try { oldTimer.Change(DebounceDelayMs, Timeout.Infinite); } catch { }
+                    return oldTimer;
+                });
+        }
+
+        private void Tab1TimerCallback(object stateObj)
+        {
+            if (isPaused) return;
+            var state = (FileEventState)stateObj;
+            string fileKey = state.FullPath.ToUpperInvariant();
+
+            if (_tab1Timers.TryRemove(fileKey, out var timer))
+            {
+                timer.Dispose();
+            }
+
             Task.Run(() =>
             {
                 try
                 {
-                    if (!WaitForFileReady(e.FullPath, 60))
+                    if (!WaitForFileReady(state.FullPath, 60))
                     {
-                        _logManager.LogEvent($"[Tab1] File locked or copy failed (timeout), skipping: {e.Name}");
+                        _logManager.LogEvent($"[Tab1] File locked or copy failed (timeout), skipping: {state.Name}");
                         return;
                     }
 
-                    string fileKey = e.FullPath.ToUpperInvariant();
-                    DateTime now = DateTime.Now;
-
-                    if (_lastProcessEventTime.Count > 2000)
-                    {
-                        lock (_cleanupLock)
-                        {
-                            if (_lastProcessEventTime.Count > 2000)
-                            {
-                                var oldKeys = _lastProcessEventTime.Where(kv => (now - kv.Value).TotalMinutes > 5).Select(kv => kv.Key).ToList();
-                                foreach (var key in oldKeys) _lastProcessEventTime.TryRemove(key, out _);
-                            }
-                        }
-                    }
-
-                    if (_lastProcessEventTime.TryGetValue(fileKey, out var lastTime) && (now - lastTime).TotalSeconds < DebounceSeconds) return;
-                    _lastProcessEventTime[fileKey] = now;
-
-                    string folder = NormalizePath(Path.GetDirectoryName(e.FullPath));
+                    string folder = NormalizePath(Path.GetDirectoryName(state.FullPath));
                     if (!_tab1RuleMap.TryGetValue(folder, out string pluginName))
                     {
-                        var parent = NormalizePath(Directory.GetParent(e.FullPath)?.FullName);
+                        var parent = NormalizePath(Directory.GetParent(state.FullPath)?.FullName);
                         if (string.IsNullOrEmpty(parent) || !_tab1RuleMap.TryGetValue(parent, out pluginName))
                         {
-                            if (_settingsManager.IsDebugMode) _logManager.LogDebug($"[Tab1] No rule for '{folder}' (File: {e.Name})");
+                            if (_settingsManager.IsDebugMode) _logManager.LogDebug($"[Tab1] No rule for '{folder}' (File: {state.Name})");
                             return;
                         }
                     }
 
-                    _logManager.LogEvent($"[Tab1] Triggered: {e.Name} ({e.ChangeType}) -> Plugin: {pluginName}");
-                    RunPlugin(pluginName, e.FullPath);
+                    _logManager.LogEvent($"[Tab1] Triggered: {state.Name} ({state.ChangeType}) -> Plugin: {pluginName}");
+                    RunPlugin(pluginName, state.FullPath);
                 }
                 catch (Exception ex)
                 {
-                    _logManager.LogError($"[Tab1] Error processing file {e.Name}: {ex.Message}");
+                    _logManager.LogError($"[Tab1] Error processing file {state.Name}: {ex.Message}");
                 }
             });
         }
@@ -513,38 +534,44 @@ namespace ITM_Agent.ucPanel
         {
             if (e.Name.Contains("_#1_") || isPaused) return;
 
+            string fileKey = e.FullPath.ToUpperInvariant();
+            string filter = (sender as FileSystemWatcher)?.Filter.ToUpperInvariant() ?? "*.*";
+            var state = new FileEventState { FullPath = e.FullPath, Name = e.Name, ChangeType = e.ChangeType, Filter = filter };
+
+            // 이벤트가 올 때마다 타이머를 1초로 리셋. 1초간 잠잠해지면 Tab2TimerCallback 실행
+            _tab2Timers.AddOrUpdate(fileKey,
+                key => new System.Threading.Timer(Tab2TimerCallback, state, DebounceDelayMs, Timeout.Infinite),
+                (key, oldTimer) =>
+                {
+                    try { oldTimer.Change(DebounceDelayMs, Timeout.Infinite); } catch { }
+                    return oldTimer;
+                });
+        }
+
+        private void Tab2TimerCallback(object stateObj)
+        {
+            if (isPaused) return;
+            var state = (FileEventState)stateObj;
+            string fileKey = state.FullPath.ToUpperInvariant();
+
+            if (_tab2Timers.TryRemove(fileKey, out var timer))
+            {
+                timer.Dispose();
+            }
+
             Task.Run(() =>
             {
                 try
                 {
-                    if (!WaitForFileReady(e.FullPath, 60)) return;
+                    if (!WaitForFileReady(state.FullPath, 60)) return;
 
-                    string fileKey = e.FullPath.ToUpperInvariant();
-                    DateTime now = DateTime.Now;
-
-                    if (_lastProcessEventTime.Count > 2000)
-                    {
-                        lock (_cleanupLock)
-                        {
-                            if (_lastProcessEventTime.Count > 2000)
-                            {
-                                var oldKeys = _lastProcessEventTime.Where(kv => (now - kv.Value).TotalMinutes > 5).Select(kv => kv.Key).ToList();
-                                foreach (var key in oldKeys) _lastProcessEventTime.TryRemove(key, out _);
-                            }
-                        }
-                    }
-
-                    if (_lastProcessEventTime.TryGetValue(fileKey, out var lastTime) && (now - lastTime).TotalSeconds < DebounceSeconds) return;
-                    _lastProcessEventTime[fileKey] = now;
-
-                    string folder = NormalizePath(Path.GetDirectoryName(e.FullPath));
-                    string filter = (sender as FileSystemWatcher)?.Filter.ToUpperInvariant();
-                    string mapKey = $"{folder}|{filter}";
+                    string folder = NormalizePath(Path.GetDirectoryName(state.FullPath));
+                    string mapKey = $"{folder}|{state.Filter}";
 
                     if (_tab2RuleMap.TryGetValue(mapKey, out string pluginName))
                     {
-                        _logManager.LogEvent($"[Tab2] Triggered: {e.Name} -> Plugin: {pluginName}");
-                        RunPlugin(pluginName, e.FullPath);
+                        _logManager.LogEvent($"[Tab2] Triggered: {state.Name} -> Plugin: {pluginName}");
+                        RunPlugin(pluginName, state.FullPath);
                     }
                     else
                     {
@@ -553,10 +580,14 @@ namespace ITM_Agent.ucPanel
                 }
                 catch (Exception ex)
                 {
-                    _logManager.LogError($"[Tab2] Error processing file {e.Name}: {ex.Message}");
+                    _logManager.LogError($"[Tab2] Error processing file {state.Name}: {ex.Message}");
                 }
             });
         }
+
+        #endregion
+
+        #region --- 플러그인 런타임 실행 ---
 
         private void RunPlugin(string pluginName, string filePath)
         {
