@@ -35,9 +35,6 @@ namespace ITM_Agent.Services
         // 설정: DB 타임아웃 (3초)
         private const int DB_TIMEOUT = 3;
 
-        // 설정: API 포트 (ITM.UploadApi 기본 포트)
-        private const int API_PORT = 8082;
-
         public bool IsConnected => _isServerConnected;
 
         public ServerConnectionManager(LogManager logManager)
@@ -154,14 +151,15 @@ namespace ITM_Agent.Services
 
             try
             {
-                // Connection.ini의 [Ftps] 섹션에서 IP만 가져옴 (포트는 API_PORT 사용)
+                // Connection.ini의 [Ftps] 섹션에서 IP와 동적 Port를 가져옴
                 var ftpInfo = FtpsInfo.CreateDefault();
                 string host = ftpInfo.Host;
+                int port = ftpInfo.Port; // 하드코딩 제거 및 동적 포트 할당
 
                 if (string.IsNullOrEmpty(host)) return false;
 
                 // Health Check URL 구성
-                string url = $"http://{host}:{API_PORT}/api/FileUpload/health";
+                string url = $"http://{host}:{port}/api/FileUpload/health";
 
                 // HTTP GET 요청
                 using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3))) // 3초 타임아웃
