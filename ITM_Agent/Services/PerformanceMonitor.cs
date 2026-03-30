@@ -242,7 +242,7 @@ namespace ITM_Agent.Services
         private bool _isInitialized = false;
 
         private static bool _sensorInfoLogged = false;
-        
+
         // 성능 카운터가 고장난 OS인지 체크하는 플래그 (반복 예외 방지)
         private static bool _isPerfCounterBroken = false;
 
@@ -521,9 +521,9 @@ namespace ITM_Agent.Services
                             topProcesses.Add(new ProcessMetric
                             {
                                 ProcessName = procInfos[i].Name,
-                                MemoryUsageMB = privateWorkingSetMB,    
+                                MemoryUsageMB = privateWorkingSetMB,
                                 SharedMemoryUsageMB = sharedMB,
-                                CommitMemoryMB = commitMB               
+                                CommitMemoryMB = commitMB
                             });
                         }
                     }
