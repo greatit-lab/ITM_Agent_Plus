@@ -181,7 +181,7 @@ namespace ITM_Agent.Services
             finally
             {
                 // [핵심 개선] DB 작업 완료 후 락 해제
-                Interlocked.Exchange(ref _isFlushing, 0); 
+                Interlocked.Exchange(ref _isFlushing, 0);
             }
         }
     }
