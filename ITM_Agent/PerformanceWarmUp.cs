@@ -34,8 +34,8 @@ namespace ITM_Agent.Startup
             {
                 string cs = DatabaseInfo.CreateDefault().GetConnectionString();
                 using (var conn = new NpgsqlConnection(cs))
-                { 
-                    conn.Open(); 
+                {
+                    conn.Open();
                 }            // SELECT 1 불필요
             }
             catch { /* 로깅만 */ }
