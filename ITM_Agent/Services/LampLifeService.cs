@@ -2,7 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
-using System.Data.SqlClient; // MSSQL 접속용
+using System.Data.SqlClient; 
 using System.Diagnostics;
 using System.Linq;
 using System.Threading;
@@ -12,9 +12,9 @@ using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Conditions;
 using FlaUI.Core.Definitions;
 using FlaUI.UIA3;
-using Microsoft.Win32; // 레지스트리 접근용
+using Microsoft.Win32; 
 using Npgsql;
-using System.ServiceProcess; // 윈도우 서비스 확인용
+using System.ServiceProcess; 
 
 namespace ITM_Agent.Services
 {
@@ -37,6 +37,9 @@ namespace ITM_Agent.Services
         private readonly object _lock = new object();
         private readonly string PROCESS_NAME;
 
+        // [핵심 개선] DB 싱크 중복 실행 차단용 플래그
+        private int _isSyncing = 0;
+
         private const int UPDATE_INTERVAL_MS = 60 * 60 * 1000; // 1시간
 
         public event Action<bool, DateTime> CollectionCompleted;
@@ -49,9 +52,6 @@ namespace ITM_Agent.Services
             PROCESS_NAME = Environment.Is64BitOperatingSystem ? "Main64" : "Main";
         }
 
-        // [수정] skipUiAutomation 파라미터 추가 (기본값 false)
-        // MainForm의 'Run' 버튼 클릭 시: Start(false) -> UI 수행
-        // MainForm의 '자동 복구' 시: Start(true) -> UI 건너뜀
         public void Start(bool skipUiAutomation = false)
         {
             lock (_lock)
@@ -65,7 +65,6 @@ namespace ITM_Agent.Services
 
                 Task.Run(async () =>
                 {
-                    // [Step 1] UI Automation (조건부 실행)
                     bool uiSuccess = false;
                     if (!skipUiAutomation)
                     {
@@ -77,19 +76,13 @@ namespace ITM_Agent.Services
                         _logManager.LogEvent("[LampLifeService] Skipping UI Automation (Auto-Recovery Mode).");
                     }
 
-                    // [Step 2] MSSQL 접속 및 매핑
-                    // UI 수행 성공했거나, 스킵 모드일 때도 MSSQL 동기화는 시도 (기존 데이터 매핑 유지)
                     if (uiSuccess || skipUiAutomation)
                     {
-                        // 스킵 모드일 때는 isInitialMapping=false로 하여 단순 업데이트만 수행하거나
-                        // 필요에 따라 true로 유지. 여기서는 안전하게 false(주기적 모드)로 진입 권장
                         bool isInitial = uiSuccess;
-
                         _logManager.LogEvent("[LampLifeService] Connecting to MSSQL for Sync...");
                         await SyncWithEquipmentDatabaseAsync(isInitial);
                     }
 
-                    // [Step 3] 주기적 MSSQL 폴링 시작
                     _schedular = new System.Threading.Timer(async _ =>
                     {
                         if (!_isRunning) return;
@@ -119,7 +112,6 @@ namespace ITM_Agent.Services
                 _mainForm.ShowTemporarilyForAutomation();
                 await Task.Delay(500);
 
-                // Application 객체도 IDisposable이므로 using으로 감싸 핸들 누수 방지
                 using (var app = FlaUI.Core.Application.Attach(PROCESS_NAME))
                 using (var automation = new UIA3Automation())
                 {
@@ -191,12 +183,15 @@ namespace ITM_Agent.Services
 
         private async Task SyncWithEquipmentDatabaseAsync(bool isInitialMapping)
         {
+            // [핵심 개선] 중복 실행 방지
+            if (Interlocked.CompareExchange(ref _isSyncing, 1, 0) == 1) return;
+
             try
             {
                 string connectionString = FindMssqlConnectionString();
                 if (string.IsNullOrEmpty(connectionString))
                 {
-                    _logManager.LogError("[LampLifeService] CRITICAL: Could not determine MSSQL Connection String. Please check server status (osql -L).");
+                    _logManager.LogError("[LampLifeService] CRITICAL: Could not determine MSSQL Connection String.");
                     return;
                 }
 
@@ -216,9 +211,6 @@ namespace ITM_Agent.Services
                         {
                             try
                             {
-                                // 안전한 형변환 (Convert 사용)
-                                // DB 컬럼이 tinyint, smallint, bigint 무엇이든 int로 변환
-                                // DB 컬럼이 datetime, datetime2, smalldatetime 무엇이든 DateTime으로 변환
                                 if (reader["LogTime"] != DBNull.Value && reader["LampID"] != DBNull.Value)
                                 {
                                     DateTime logTime = Convert.ToDateTime(reader["LogTime"]);
@@ -228,7 +220,6 @@ namespace ITM_Agent.Services
                             }
                             catch (Exception castEx)
                             {
-                                // 데이터 1건 변환 실패는 로그 남기고 건너뜀 (전체 중단 방지)
                                 _logManager.LogDebug($"[LampLifeService] Data conversion skipped for a row: {castEx.Message}");
                             }
                         }
@@ -248,6 +239,10 @@ namespace ITM_Agent.Services
             {
                 _logManager.LogError($"[LampLifeService] MSSQL Sync Failed: {ex.Message}");
             }
+            finally
+            {
+                Interlocked.Exchange(ref _isSyncing, 0); // 락 해제
+            }
         }
 
         private async Task UpdatePostgresWithMssqlData(List<(DateTime LogTime, int LampID)> mssqlLogs, bool isMappingMode)
@@ -258,7 +253,6 @@ namespace ITM_Agent.Services
                 await pgConn.OpenAsync();
                 string eqpid = _settingsManager.GetEqpid();
 
-                // [수정] Nullable DateTime으로 변경
                 var currentData = new List<(string LampName, int? LampNo, DateTime? LastChanged)>();
                 using (var cmd = new NpgsqlCommand("SELECT lamp_name, lamp_no, last_changed FROM public.eqp_lamp_life WHERE eqpid = @eqpid", pgConn))
                 {
@@ -267,7 +261,6 @@ namespace ITM_Agent.Services
                     {
                         while (await reader.ReadAsync())
                         {
-                            // [수정] IsDBNull 체크를 추가하여 Null일 경우 안전하게 null 반환
                             currentData.Add((
                                 reader.GetString(0),
                                 reader.IsDBNull(1) ? (int?)null : reader.GetInt32(1),
@@ -281,7 +274,6 @@ namespace ITM_Agent.Services
                 {
                     if (isMappingMode)
                     {
-                        // [수정] .HasValue 체크 및 .Value 접근
                         var match = mssqlLogs.FirstOrDefault(m => pgRow.LastChanged.HasValue && Math.Abs((m.LogTime - pgRow.LastChanged.Value).TotalSeconds) < 2);
                         if (match.LampID > 0)
                         {
@@ -301,7 +293,6 @@ namespace ITM_Agent.Services
                         {
                             var latestLog = mssqlLogs.Where(m => m.LampID == pgRow.LampNo.Value).OrderByDescending(m => m.LogTime).FirstOrDefault();
 
-                            // [수정] Null이거나(아직 교체안됨) 새로운 로그의 시간이 더 최근일 경우
                             if (latestLog.LampID > 0 && (!pgRow.LastChanged.HasValue || latestLog.LogTime > pgRow.LastChanged.Value))
                             {
                                 int newAge = (int)(DateTime.Now - latestLog.LogTime).TotalHours;
@@ -331,7 +322,6 @@ namespace ITM_Agent.Services
             string foundInstance = null;
             string machineName = Environment.MachineName;
 
-            // 1. Registry 검색
             try
             {
                 using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL"))
@@ -352,7 +342,6 @@ namespace ITM_Agent.Services
             }
             catch { }
 
-            // 2. Windows Service 검색
             if (string.IsNullOrEmpty(foundInstance))
             {
                 try
@@ -375,7 +364,6 @@ namespace ITM_Agent.Services
                 catch { }
             }
 
-            // 3. Command Line (osql -L / sqlcmd -L) 실행 및 파싱
             if (string.IsNullOrEmpty(foundInstance))
             {
                 _logManager.LogEvent("[LampLifeService] Registry/Service search failed. Trying 'sqlcmd -L'...");
@@ -388,7 +376,6 @@ namespace ITM_Agent.Services
                 return null;
             }
 
-            // 호스트 이름 '.' (로컬) 사용
             string dataSource = $".\\{foundInstance}";
             return $"Data Source={dataSource};Initial Catalog=N2000_MEASURE;Integrated Security=True;TrustServerCertificate=True;";
         }
@@ -537,7 +524,6 @@ namespace ITM_Agent.Services
             return new DateTime(dt.Year, dt.Month, dt.Day, dt.Hour, dt.Minute, dt.Second);
         }
 
-        // --- UI Helper Methods ---
         private FlaUI.Core.AutomationElements.Button FindButton(Window window, string name, string autoId)
         {
             var btn = window.FindFirstDescendant(cf => cf.ByName(name).And(cf.ByControlType(ControlType.Button)))?.AsButton();
