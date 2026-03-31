@@ -1,4 +1,4 @@
-// ITM_Agent/Services/LampLifeService.cs
+// ITM_Agent_Plus/Services/OntoOntoLampLifeService.cs
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -27,7 +27,7 @@ namespace ITM_Agent.Services
         public string LastChanged;
     }
 
-    public class LampLifeService
+    public class OntoOntoLampLifeService
     {
         private readonly SettingsManager _settingsManager;
         private readonly LogManager _logManager;
@@ -37,14 +37,14 @@ namespace ITM_Agent.Services
         private readonly object _lock = new object();
         private readonly string PROCESS_NAME;
 
-        // [핵심 개선] DB 싱크 중복 실행 차단용 플래그
+        // DB 싱크 중복 실행 차단용 플래그
         private int _isSyncing = 0;
 
         private const int UPDATE_INTERVAL_MS = 60 * 60 * 1000; // 1시간
 
         public event Action<bool, DateTime> CollectionCompleted;
 
-        public LampLifeService(SettingsManager settingsManager, LogManager logManager, MainForm mainForm)
+        public OntoLampLifeService(SettingsManager settingsManager, LogManager logManager, MainForm mainForm)
         {
             _settingsManager = settingsManager;
             _logManager = logManager;
@@ -59,7 +59,7 @@ namespace ITM_Agent.Services
                 if (_isRunning || !_settingsManager.IsLampLifeCollectorEnabled) return;
 
                 _isRunning = true;
-                _logManager.LogEvent($"[LampLifeService] Service Started. (SkipUI: {skipUiAutomation})");
+                _logManager.LogEvent($"[OntoLampLifeService] Service Started. (SkipUI: {skipUiAutomation})");
 
                 MigrateDatabaseSchema();
 
@@ -68,18 +68,18 @@ namespace ITM_Agent.Services
                     bool uiSuccess = false;
                     if (!skipUiAutomation)
                     {
-                        _logManager.LogEvent("[LampLifeService] Executing Initial UI Automation...");
+                        _logManager.LogEvent("[OntoLampLifeService] Executing Initial UI Automation...");
                         uiSuccess = await ExecuteUiCollectionAsync();
                     }
                     else
                     {
-                        _logManager.LogEvent("[LampLifeService] Skipping UI Automation (Auto-Recovery Mode).");
+                        _logManager.LogEvent("[OntoLampLifeService] Skipping UI Automation (Auto-Recovery Mode).");
                     }
 
                     if (uiSuccess || skipUiAutomation)
                     {
                         bool isInitial = uiSuccess;
-                        _logManager.LogEvent("[LampLifeService] Connecting to MSSQL for Sync...");
+                        _logManager.LogEvent("[OntoLampLifeService] Connecting to MSSQL for Sync...");
                         await SyncWithEquipmentDatabaseAsync(isInitial);
                     }
 
@@ -100,7 +100,7 @@ namespace ITM_Agent.Services
                 _isRunning = false;
                 _schedular?.Dispose();
                 _schedular = null;
-                _logManager.LogEvent("[LampLifeService] Service Stopped.");
+                _logManager.LogEvent("[OntoLampLifeService] Service Stopped.");
             }
         }
 
@@ -164,7 +164,7 @@ namespace ITM_Agent.Services
             }
             catch (Exception ex)
             {
-                _logManager.LogError($"[LampLifeService] UI Automation Error: {ex.Message}");
+                _logManager.LogError($"[OntoLampLifeService] UI Automation Error: {ex.Message}");
                 return false;
             }
             finally
@@ -191,11 +191,11 @@ namespace ITM_Agent.Services
                 string connectionString = FindMssqlConnectionString();
                 if (string.IsNullOrEmpty(connectionString))
                 {
-                    _logManager.LogError("[LampLifeService] CRITICAL: Could not determine MSSQL Connection String.");
+                    _logManager.LogError("[OntoLampLifeService] CRITICAL: Could not determine MSSQL Connection String.");
                     return;
                 }
 
-                _logManager.LogDebug($"[LampLifeService] Connecting to Equipment DB: {connectionString}");
+                _logManager.LogDebug($"[OntoLampLifeService] Connecting to Equipment DB: {connectionString}");
 
                 using (var conn = new SqlConnection(connectionString))
                 {
@@ -220,7 +220,7 @@ namespace ITM_Agent.Services
                             }
                             catch (Exception castEx)
                             {
-                                _logManager.LogDebug($"[LampLifeService] Data conversion skipped for a row: {castEx.Message}");
+                                _logManager.LogDebug($"[OntoLampLifeService] Data conversion skipped for a row: {castEx.Message}");
                             }
                         }
                     }
@@ -231,13 +231,13 @@ namespace ITM_Agent.Services
                     }
                     else
                     {
-                        _logManager.LogEvent("[LampLifeService] No logs found in Equipment DB.");
+                        _logManager.LogEvent("[OntoLampLifeService] No logs found in Equipment DB.");
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logManager.LogError($"[LampLifeService] MSSQL Sync Failed: {ex.Message}");
+                _logManager.LogError($"[OntoLampLifeService] MSSQL Sync Failed: {ex.Message}");
             }
             finally
             {
@@ -283,7 +283,7 @@ namespace ITM_Agent.Services
                                 updateCmd.Parameters.AddWithValue("@eqpid", eqpid);
                                 updateCmd.Parameters.AddWithValue("@name", pgRow.LampName);
                                 await updateCmd.ExecuteNonQueryAsync();
-                                _logManager.LogEvent($"[LampLifeService] Mapped '{pgRow.LampName}' -> LampID {match.LampID}");
+                                _logManager.LogEvent($"[OntoLampLifeService] Mapped '{pgRow.LampName}' -> LampID {match.LampID}");
                             }
                         }
                     }
@@ -308,7 +308,7 @@ namespace ITM_Agent.Services
                                     updateCmd.Parameters.AddWithValue("@eqpid", eqpid);
                                     updateCmd.Parameters.AddWithValue("@no", pgRow.LampNo.Value);
                                     await updateCmd.ExecuteNonQueryAsync();
-                                    _logManager.LogEvent($"[LampLifeService] Updated '{pgRow.LampName}' (ID:{pgRow.LampNo}) : Changed {cleanLastChanged}");
+                                    _logManager.LogEvent($"[OntoLampLifeService] Updated '{pgRow.LampName}' (ID:{pgRow.LampNo}) : Changed {cleanLastChanged}");
                                 }
                             }
                         }
@@ -333,7 +333,7 @@ namespace ITM_Agent.Services
                             if (name.IndexOf("SQLSERVER", StringComparison.OrdinalIgnoreCase) >= 0)
                             {
                                 foundInstance = name;
-                                _logManager.LogEvent($"[LampLifeService] Found MSSQL Instance (Registry): {foundInstance}");
+                                _logManager.LogEvent($"[OntoLampLifeService] Found MSSQL Instance (Registry): {foundInstance}");
                                 break;
                             }
                         }
@@ -355,7 +355,7 @@ namespace ITM_Agent.Services
                             if (instancePart.IndexOf("SQLSERVER", StringComparison.OrdinalIgnoreCase) >= 0)
                             {
                                 foundInstance = instancePart;
-                                _logManager.LogEvent($"[LampLifeService] Found MSSQL Instance (Service): {foundInstance}");
+                                _logManager.LogEvent($"[OntoLampLifeService] Found MSSQL Instance (Service): {foundInstance}");
                                 break;
                             }
                         }
@@ -366,13 +366,13 @@ namespace ITM_Agent.Services
 
             if (string.IsNullOrEmpty(foundInstance))
             {
-                _logManager.LogEvent("[LampLifeService] Registry/Service search failed. Trying 'sqlcmd -L'...");
+                _logManager.LogEvent("[OntoLampLifeService] Registry/Service search failed. Trying 'sqlcmd -L'...");
                 foundInstance = GetInstanceFromCommandLine(machineName);
             }
 
             if (string.IsNullOrEmpty(foundInstance))
             {
-                _logManager.LogError($"[LampLifeService] Failed to detect any SQL Instance containing 'SQLSERVER' on host {machineName}.");
+                _logManager.LogError($"[OntoLampLifeService] Failed to detect any SQL Instance containing 'SQLSERVER' on host {machineName}.");
                 return null;
             }
 
@@ -416,7 +416,7 @@ namespace ITM_Agent.Services
                                     if (slashIdx >= 0)
                                     {
                                         found = trimmed.Substring(slashIdx + 1).Trim();
-                                        _logManager.LogEvent($"[LampLifeService] Found Instance via {cmd}: {found}");
+                                        _logManager.LogEvent($"[OntoLampLifeService] Found Instance via {cmd}: {found}");
                                         return found;
                                     }
                                 }
@@ -426,7 +426,7 @@ namespace ITM_Agent.Services
                 }
                 catch (Exception ex)
                 {
-                    _logManager.LogDebug($"[LampLifeService] '{cmd} -L' failed: {ex.Message}");
+                    _logManager.LogDebug($"[OntoLampLifeService] '{cmd} -L' failed: {ex.Message}");
                 }
             }
             return null;
@@ -458,7 +458,7 @@ namespace ITM_Agent.Services
             }
             catch (Exception ex)
             {
-                _logManager.LogError($"[LampLifeService] Schema Migration Failed: {ex.Message}");
+                _logManager.LogError($"[OntoLampLifeService] Schema Migration Failed: {ex.Message}");
             }
         }
 
