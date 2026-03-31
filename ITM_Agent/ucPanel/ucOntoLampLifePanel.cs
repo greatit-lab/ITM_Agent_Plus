@@ -1,4 +1,4 @@
-// ITM_Agent/ucPanel/ucLampLifePanel.cs
+// ITM_Agent_Plus/ucPanel/ucOntoLampLifePanel.cs
 using ITM_Agent.Services;
 using System;
 using System.Drawing;
@@ -7,13 +7,13 @@ using System.Windows.Forms;
 
 namespace ITM_Agent.ucPanel
 {
-    public partial class ucLampLifePanel : UserControl
+    public partial class ucOntoLampLifePanel : UserControl
     {
         private readonly SettingsManager _settingsManager;
-        private readonly LampLifeService _lampLifeService;
+        private readonly OntoLampLifeService _lampLifeService;
         private bool _isAgentRunning = false;
 
-        public ucLampLifePanel(SettingsManager settingsManager, LampLifeService lampLifeService)
+        public ucOntoLampLifePanel(SettingsManager settingsManager, OntoLampLifeService lampLifeService)
         {
             InitializeComponent();
             _settingsManager = settingsManager;
@@ -52,7 +52,7 @@ namespace ITM_Agent.ucPanel
 
         private void LoadSettings()
         {
-            chkEnable.Checked = _settingsManager.IsLampLifeCollectorEnabled;
+            chkEnable.Checked = _settingsManager.IsOntoLampLifeCollectorEnabled;
             // Interval 설정 로드 로직 제거 (1시간 고정)
             UpdateControlsEnabled();
         }
@@ -60,7 +60,7 @@ namespace ITM_Agent.ucPanel
         private void chkEnable_CheckedChanged(object sender, EventArgs e)
         {
             if (_isAgentRunning) return;
-            _settingsManager.IsLampLifeCollectorEnabled = chkEnable.Checked;
+            _settingsManager.IsOntoLampLifeCollectorEnabled = chkEnable.Checked;
             UpdateControlsEnabled();
         }
 
