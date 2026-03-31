@@ -1,4 +1,4 @@
-// ITM_Agent/MainForm.Designer.cs
+// ITM_Agent_Plus/MainForm.Designer.cs
 using ITM_Agent.Services;
 using System.Drawing;
 using System.Windows.Forms;
@@ -228,25 +228,25 @@ namespace ITM_Agent
             // tsm_OverrideNames
             // 
             this.tsm_OverrideNames.Name = "tsm_OverrideNames";
-            this.tsm_OverrideNames.Size = new System.Drawing.Size(160, 22);
+            this.tsm_OverrideNames.Size = new System.Drawing.Size(179, 22);
             this.tsm_OverrideNames.Text = "Override Names";
             // 
             // tsm_ImageTrans
             // 
             this.tsm_ImageTrans.Name = "tsm_ImageTrans";
-            this.tsm_ImageTrans.Size = new System.Drawing.Size(160, 22);
+            this.tsm_ImageTrans.Size = new System.Drawing.Size(179, 22);
             this.tsm_ImageTrans.Text = "Image Trans";
             // 
             // tsm_UploadData
             // 
             this.tsm_UploadData.Name = "tsm_UploadData";
-            this.tsm_UploadData.Size = new System.Drawing.Size(180, 22);
+            this.tsm_UploadData.Size = new System.Drawing.Size(179, 22);
             this.tsm_UploadData.Text = "Upload Data";
             // 
             // tsm_LampLifeCollector
             // 
             this.tsm_LampLifeCollector.Name = "tsm_LampLifeCollector";
-            this.tsm_LampLifeCollector.Size = new System.Drawing.Size(180, 22);
+            this.tsm_LampLifeCollector.Size = new System.Drawing.Size(179, 22);
             this.tsm_LampLifeCollector.Text = "Lamp Life Collector";
             // 
             // tsm_Nova
@@ -302,7 +302,7 @@ namespace ITM_Agent
             // tsm_AboutInfo
             // 
             this.tsm_AboutInfo.Name = "tsm_AboutInfo";
-            this.tsm_AboutInfo.Size = new System.Drawing.Size(180, 22);
+            this.tsm_AboutInfo.Size = new System.Drawing.Size(146, 22);
             this.tsm_AboutInfo.Text = "Information...";
             // 
             // newConfigurationToolStripMenuItem
@@ -495,7 +495,7 @@ namespace ITM_Agent
             this.MainMenuStrip = this.menuStrip1;
             this.Name = "MainForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
-            this.Text = "ITM Agent";
+            this.Text = "ITM Agent+";
             this.Load += new System.EventHandler(this.MainForm_Load);
             this.menuStrip1.ResumeLayout(false);
             this.menuStrip1.PerformLayout();
