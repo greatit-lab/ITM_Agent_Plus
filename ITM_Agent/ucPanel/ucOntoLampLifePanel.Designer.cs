@@ -1,7 +1,7 @@
-// ITM_Agent/ucPanel/ucLampLifePanel.Designer.cs
+// ITM_Agent_Plus/ucPanel/ucOntoLampLifePanel.Designer.cs
 namespace ITM_Agent.ucPanel
 {
-    partial class ucLampLifePanel
+    partial class ucOntoLampLifePanel
     {
         private System.ComponentModel.IContainer components = null;
 
@@ -101,12 +101,12 @@ namespace ITM_Agent.ucPanel
             this.label1.TabIndex = 0;
             this.label1.Text = "• Enable Lamp Life Data Collection";
             // 
-            // ucLampLifePanel
+            // ucOntoLampLifePanel
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 12F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.Controls.Add(this.groupBox1);
-            this.Name = "ucLampLifePanel";
+            this.Name = "ucOntoLampLifePanel";
             this.Size = new System.Drawing.Size(676, 340);
             this.groupBox1.ResumeLayout(false);
             this.groupBox1.PerformLayout();
