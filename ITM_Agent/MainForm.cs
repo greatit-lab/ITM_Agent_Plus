@@ -1,4 +1,4 @@
-// ITM_Agent/MainForm.cs
+// ITM_Agent_Plus/MainForm.cs
 using ITM_Agent.Services;
 using ITM_Agent.Startup;
 using ITM_Agent.ucPanel;
@@ -17,16 +17,16 @@ namespace ITM_Agent
         private bool isExiting = false;
         private SettingsManager settingsManager;
         private LogManager logManager;
+        
+        // --- Common Services ---
         private FileWatcherManager fileWatcherManager;
         private EqpidManager eqpidManager;
         private InfoRetentionCleaner infoCleaner;
-        private LampLifeService lampLifeService;
-
-        // ConfigUpdateService 필드
         private ConfigUpdateService configUpdateService;
-
-        // 서버 연결 상태 관리자
         private ServerConnectionManager serverConnectionManager;
+
+        // --- Onto Specific Services ---
+        private OntoLampLifeService ontoLampLifeService;
 
         private NotifyIcon trayIcon;
         private ContextMenuStrip trayMenu;
@@ -54,17 +54,19 @@ namespace ITM_Agent
 
         ucPanel.ucConfigurationPanel ucSc1;
 
+        // --- Common Panels ---
         private ucConfigurationPanel ucConfigPanel;
-        private ucOverrideNamesPanel ucOverrideNamesPanel;
-        private ucImageTransPanel ucImageTransPanel;
-
-        private bool isRunning = false; // 현재 상태 플래그
-        private bool isDebugMode = false;   // 디버그 모드 상태
-        private ucOptionPanel ucOptionPanel;  // ← 옵션 패널
-
-        private ucUploadPanel ucUploadPanel;
+        private ucOptionPanel ucOptionPanel;
         private ucPluginPanel ucPluginPanel;
-        private ucLampLifePanel ucLampLifePanel;
+
+        // --- Onto Specific Panels ---
+        private ucOntoOverrideNamesPanel ucOntoOverrideNamesPanel;
+        private ucOntoImageTransPanel ucOntoImageTransPanel;
+        private ucOntoUploadPanel ucOntoUploadPanel;
+        private ucOntoLampLifePanel ucOntoLampLifePanel;
+
+        private bool isRunning = false; 
+        private bool isDebugMode = false;   
 
         protected override void OnLoad(EventArgs e)
         {
@@ -75,7 +77,6 @@ namespace ITM_Agent
         public MainForm(SettingsManager settingsManager)
         {
             this.settingsManager = settingsManager ?? throw new ArgumentNullException(nameof(settingsManager));
-            this.settingsManager = settingsManager;
 
             InitializeComponent();
 
@@ -84,16 +85,16 @@ namespace ITM_Agent
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
             logManager = new LogManager(baseDir);
 
-            lampLifeService = new LampLifeService(this.settingsManager, this.logManager, this);
+            // Onto 전용 서비스 초기화
+            ontoLampLifeService = new OntoLampLifeService(this.settingsManager, this.logManager, this);
 
             InitializeUserControls();
             RegisterMenuEvents();
 
-            ucImageTransPanel.ImageSaveFolderChanged += ucUploadPanel.LoadImageSaveFolder_PathChanged;
+            ucOntoImageTransPanel.ImageSaveFolderChanged += ucOntoUploadPanel.LoadImageSaveFolder_PathChanged;
 
             ucSc1 = new ucPanel.ucConfigurationPanel(settingsManager);
-            ucOverrideNamesPanel = new ucOverrideNamesPanel(settingsManager, this.ucConfigPanel, this.logManager, this.settingsManager.IsDebugMode);
-
+            
             fileWatcherManager = new FileWatcherManager(settingsManager, logManager, isDebugMode);
 
             eqpidManager = new EqpidManager(settingsManager, logManager, VersionInfo);
@@ -108,7 +109,6 @@ namespace ITM_Agent
 
             infoCleaner = new InfoRetentionCleaner(settingsManager);
 
-            // ServerConnectionManager 초기화 및 이벤트 구독
             serverConnectionManager = new ServerConnectionManager(logManager);
             serverConnectionManager.ConnectionStatusChanged += OnServerConnectionStatusChanged;
 
@@ -128,10 +128,8 @@ namespace ITM_Agent
             UpdateUIBasedOnSettings();
         }
 
-        // [수정] 서버 연결 상태 변경 핸들러
         private void OnServerConnectionStatusChanged(bool isConnected, bool isDbOk, bool isFtpOk, string message)
         {
-            // UI 스레드에서 실행 보장
             if (this.InvokeRequired)
             {
                 this.Invoke(new Action(() => OnServerConnectionStatusChanged(isConnected, isDbOk, isFtpOk, message)));
@@ -140,56 +138,36 @@ namespace ITM_Agent
 
             logManager.LogEvent($"[MainForm] Server Status Update: DB={isDbOk}, API={isFtpOk} ({message})");
 
-            // ucOptionPanel의 상태 표시등 즉시 동기화
             ucOptionPanel?.SetDirectConnectionStatus(isDbOk, isFtpOk);
 
-            // ─────────────────────────────────────────────────────────────
-            // [개선 1] DB 의존 기능 독립 제어 (성능 정보, 램프 수명)
-            // ─────────────────────────────────────────────────────────────
             if (isDbOk)
             {
-                // DB가 정상이면 성능 데이터 수집 즉시 재개 (API 상태 무관)
                 PerformanceDbWriter.Start(lb_eqpid.Text, eqpidManager);
-
-                // 램프 서비스 재개 (자동 복구 시 UI 자동화는 건너뜀)
-                lampLifeService?.Start(true);
+                ontoLampLifeService?.Start(true);
             }
             else
             {
-                // DB가 끊겼을 때만 중단
                 PerformanceDbWriter.Stop();
-                lampLifeService?.Stop();
+                ontoLampLifeService?.Stop();
             }
 
-            // ─────────────────────────────────────────────────────────────
-            // [개선 2] 파일 업로드 의존 기능 (파일 감시, API 필요)
-            // ─────────────────────────────────────────────────────────────
-            // 파일 업로드는 DB와 API가 모두 살아야 의미가 있음 (기존 isConnected 유지)
             if (isConnected)
             {
-                // 상태 메시지가 이미 Running인 경우 중복 갱신 방지
                 if (ts_Status.Text != "Running (Recovered)")
                 {
                     UpdateMainStatus("Running (Recovered)", Color.Blue);
-
-                    // 1. 파일 감시 재개
                     fileWatcherManager?.ResumeWatching();
-                    ucUploadPanel?.ResumeWatching();
-
-                    // 2. 누락 파일 복구 스캔 (비동기) - Slow Recovery
+                    ucOntoUploadPanel?.ResumeWatching();
                     Task.Run(() => fileWatcherManager?.StartRecoveryScan());
                 }
             }
             else
             {
-                // API나 DB 중 하나라도 안 되면 파일 처리는 보류
                 if (!statusStrip1.Text.StartsWith("Holding"))
                 {
                     UpdateMainStatus("Holding (Unstable Connection)", Color.Red);
-
-                    // 1. 파일 감시 일시 정지
                     fileWatcherManager?.PauseWatching();
-                    ucUploadPanel?.PauseWatching();
+                    ucOntoUploadPanel?.PauseWatching();
                 }
             }
         }
@@ -335,17 +313,18 @@ namespace ITM_Agent
             ts_Status.Text = status;
             ts_Status.ForeColor = color;
 
-            // [중요] Holding 상태도 'Running'의 일종(실행 중 대기)으로 취급하여 UI를 잠급니다.
             bool isActiveRunning = status.StartsWith("Running") || status.StartsWith("Holding");
 
-            ucOverrideNamesPanel?.UpdateStatus(status);
             ucConfigPanel?.UpdateStatusOnRun(isActiveRunning);
-            ucOverrideNamesPanel?.UpdateStatusOnRun(isActiveRunning);
-            ucImageTransPanel?.UpdateStatusOnRun(isActiveRunning);
-            ucUploadPanel?.UpdateStatusOnRun(isActiveRunning);
-            ucPluginPanel?.UpdateStatusOnRun(isActiveRunning);
             ucOptionPanel?.UpdateStatusOnRun(isActiveRunning);
-            ucLampLifePanel?.UpdateStatusOnRun(isActiveRunning);
+            ucPluginPanel?.UpdateStatusOnRun(isActiveRunning);
+
+            // Onto 전용 패널 상태 업데이트
+            ucOntoOverrideNamesPanel?.UpdateStatus(status);
+            ucOntoOverrideNamesPanel?.UpdateStatusOnRun(isActiveRunning);
+            ucOntoImageTransPanel?.UpdateStatusOnRun(isActiveRunning);
+            ucOntoUploadPanel?.UpdateStatusOnRun(isActiveRunning);
+            ucOntoLampLifePanel?.UpdateStatusOnRun(isActiveRunning);
 
             logManager.LogEvent($"Status updated to: {status}");
             if (isDebugMode)
@@ -363,10 +342,10 @@ namespace ITM_Agent
                 btn_Stop.Enabled = false;
                 btn_Quit.Enabled = true;
             }
-            else if (isActiveRunning) // Running, Recovered, or Holding
+            else if (isActiveRunning)
             {
                 btn_Run.Enabled = false;
-                btn_Stop.Enabled = true; // 멈출 수는 있어야 함
+                btn_Stop.Enabled = true; 
                 btn_Quit.Enabled = false;
             }
             else
@@ -377,7 +356,7 @@ namespace ITM_Agent
             }
 
             UpdateTrayMenuStatus();
-            UpdateMenuItemsState(isActiveRunning); // 메뉴도 비활성화
+            UpdateMenuItemsState(isActiveRunning);
             UpdateButtonsState();
         }
 
@@ -409,10 +388,10 @@ namespace ITM_Agent
 
         private void PerformRunLogic()
         {
-            if (ucUploadPanel != null)
+            if (ucOntoUploadPanel != null)
             {
                 string validationError;
-                if (ucUploadPanel.HasInvalidRules(out validationError))
+                if (ucOntoUploadPanel.HasInvalidRules(out validationError))
                 {
                     MessageBox.Show($"실행할 수 없습니다. Upload 패널 설정을 확인하세요.\n\n{validationError}",
                                     "실행 오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -436,14 +415,11 @@ namespace ITM_Agent
             try
             {
                 fileWatcherManager.StartWatching();
-                ucUploadPanel?.UpdateStatusOnRun(true);
+                ucOntoUploadPanel?.UpdateStatusOnRun(true);
 
                 PerformanceDbWriter.Start(lb_eqpid.Text, this.eqpidManager);
+                ontoLampLifeService.Start(false);
 
-                // [수정] 수동 실행 시에는 UI 자동화를 수행함 (false)
-                lampLifeService.Start(false);
-
-                // 서버 모니터링 시작
                 serverConnectionManager.Start();
 
                 isRunning = true;
@@ -495,14 +471,13 @@ namespace ITM_Agent
         {
             try
             {
-                // 서버 모니터링 중지
                 serverConnectionManager.Stop();
 
                 fileWatcherManager.StopWatchers();
-                ucUploadPanel?.UpdateStatusOnRun(false);
+                ucOntoUploadPanel?.UpdateStatusOnRun(false);
 
                 PerformanceDbWriter.Stop();
-                lampLifeService.Stop();
+                ontoLampLifeService.Stop();
 
                 isRunning = false;
 
@@ -511,7 +486,7 @@ namespace ITM_Agent
                                  isReady ? Color.Green : Color.Red);
 
                 if (isDebugMode)
-                    logManager.LogDebug("FileWatcherManager & ucUploadPanel Watchers stopped successfully.");
+                    logManager.LogDebug("FileWatcherManager & Watchers stopped successfully.");
             }
             catch (Exception ex)
             {
@@ -548,13 +523,12 @@ namespace ITM_Agent
                 fileWatcherManager?.StopWatchers();
                 fileWatcherManager = null;
 
-                lampLifeService?.Stop();
-                lampLifeService = null;
+                ontoLampLifeService?.Stop();
+                ontoLampLifeService = null;
 
                 configUpdateService?.Dispose();
                 configUpdateService = null;
 
-                // 모니터링 매니저 정리
                 serverConnectionManager?.Dispose();
                 serverConnectionManager = null;
 
@@ -631,7 +605,7 @@ namespace ITM_Agent
 
             ucSc1.RefreshUI();
             ucConfigPanel?.RefreshUI();
-            ucOverrideNamesPanel?.RefreshUI();
+            ucOntoOverrideNamesPanel?.RefreshUI();
 
             UpdateUIBasedOnSettings();
         }
@@ -693,35 +667,48 @@ namespace ITM_Agent
 
         private void InitializeUserControls()
         {
+            // Common 패널 생성
             ucConfigPanel = new ucConfigurationPanel(settingsManager);
             ucPluginPanel = new ucPluginPanel(settingsManager);
-            ucOverrideNamesPanel = new ucOverrideNamesPanel(
-                settingsManager, ucConfigPanel, logManager, settingsManager.IsDebugMode);
-            ucImageTransPanel = new ucImageTransPanel(settingsManager, ucConfigPanel);
-            ucUploadPanel = new ucUploadPanel(
-                ucConfigPanel, ucPluginPanel, settingsManager, ucOverrideNamesPanel, ucImageTransPanel);
             ucOptionPanel = new ucOptionPanel(settingsManager);
             ucOptionPanel.DebugModeChanged += OptionPanel_DebugModeChanged;
-            ucLampLifePanel = new ucLampLifePanel(settingsManager, lampLifeService);
 
-            this.Controls.Add(ucOverrideNamesPanel);
+            // Onto 전용 패널 생성
+            ucOntoOverrideNamesPanel = new ucOntoOverrideNamesPanel(
+                settingsManager, ucConfigPanel, logManager, settingsManager.IsDebugMode);
+            ucOntoImageTransPanel = new ucOntoImageTransPanel(settingsManager, ucConfigPanel);
+            ucOntoUploadPanel = new ucOntoUploadPanel(
+                ucConfigPanel, ucPluginPanel, settingsManager, ucOntoOverrideNamesPanel, ucOntoImageTransPanel);
+            ucOntoLampLifePanel = new ucOntoLampLifePanel(settingsManager, ontoLampLifeService);
 
+            this.Controls.Add(ucOntoOverrideNamesPanel);
+
+            // 초기화
             ucConfigPanel.InitializePanel(isRunning);
-            ucOverrideNamesPanel.InitializePanel(isRunning);
             ucPluginPanel.InitializePanel(isRunning);
             ucOptionPanel.InitializePanel(isRunning);
+            
+            ucOntoOverrideNamesPanel.InitializePanel(isRunning);
         }
 
         private void RegisterMenuEvents()
         {
+            // Common 메뉴
             tsm_Categorize.Click += (s, e) => ShowUserControl(ucConfigPanel);
-            tsm_OverrideNames.Click += (s, e) => ShowUserControl(ucOverrideNamesPanel);
-            tsm_ImageTrans.Click += (s, e) => ShowUserControl(ucImageTransPanel);
-            tsm_UploadData.Click += (s, e) => ShowUserControl(ucUploadPanel);
-            tsm_LampLifeCollector.Click += (s, e) => ShowUserControl(ucLampLifePanel);
-            tsm_PluginList.Click += (s, e) => ShowUserControl(ucPluginPanel);
             tsm_Option.Click += (s, e) => ShowUserControl(ucOptionPanel);
+            tsm_PluginList.Click += (s, e) => ShowUserControl(ucPluginPanel);
             tsm_AboutInfo.Click += tsm_AboutInfo_Click;
+
+            // ONTO 전용 메뉴
+            tsm_OverrideNames.Click += (s, e) => ShowUserControl(ucOntoOverrideNamesPanel);
+            tsm_ImageTrans.Click += (s, e) => ShowUserControl(ucOntoImageTransPanel);
+            tsm_UploadData.Click += (s, e) => ShowUserControl(ucOntoUploadPanel);
+            tsm_LampLifeCollector.Click += (s, e) => ShowUserControl(ucOntoLampLifePanel);
+
+            // NOVA 전용 메뉴 (구현 예정)
+            toolStripMenuItem4.Click += (s, e) => MessageBox.Show("Nova Override Names 로직은 아직 구현되지 않았습니다.", "알림");
+            toolStripMenuItem5.Click += (s, e) => MessageBox.Show("Nova Image Trans 로직은 아직 구현되지 않았습니다.", "알림");
+            toolStripMenuItem6.Click += (s, e) => MessageBox.Show("Nova Upload Data 로직은 아직 구현되지 않았습니다.", "알림");
         }
 
         private void OptionPanel_DebugModeChanged(bool isDebug)
@@ -747,12 +734,11 @@ namespace ITM_Agent
             pMain.Controls.Add(control);
             control.Dock = DockStyle.Fill;
 
-            // [수정] 각 패널의 상태 초기화 (메뉴 이동 시 잠금 풀림 방지)
             if (control is ucConfigurationPanel cfg) cfg.InitializePanel(isRunning);
-            else if (control is ucOverrideNamesPanel ov) ov.InitializePanel(isRunning);
-            else if (control is ucPluginPanel plg) plg.InitializePanel(isRunning);
             else if (control is ucOptionPanel opt) opt.InitializePanel(isRunning);
-            else if (control is ucUploadPanel upload) upload.InitializePanel(isRunning); // [추가] Upload 패널 초기화
+            else if (control is ucPluginPanel plg) plg.InitializePanel(isRunning);
+            else if (control is ucOntoOverrideNamesPanel ov) ov.InitializePanel(isRunning);
+            else if (control is ucOntoUploadPanel upload) upload.InitializePanel(isRunning); 
 
             if (control == ucOptionPanel)
             {
