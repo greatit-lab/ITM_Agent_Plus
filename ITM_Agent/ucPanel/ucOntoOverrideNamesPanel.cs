@@ -290,7 +290,7 @@ namespace ITM_Agent.ucPanel
             try
             {
                 if (File.Exists(newFilePath)) return newFilePath;
-                using (File.Create(newFilePath)) { } 
+                using (File.Create(newFilePath)) { }
                 return newFilePath;
             }
             catch (IOException)
@@ -495,7 +495,7 @@ namespace ITM_Agent.ucPanel
 
             var targetWaferMatch = Regex.Match(fileName, @"_#(\d+)_");
             if (!targetWaferMatch.Success) return null;
-            string targetWaferStr = targetWaferMatch.Value; 
+            string targetWaferStr = targetWaferMatch.Value;
 
             var sortedData = baselineData.Values.OrderByDescending(d => d.TimeInfo).ToList();
             string cleanFileName = Regex.Replace(fileName, @"[^a-zA-Z0-9]", "").ToUpperInvariant();
