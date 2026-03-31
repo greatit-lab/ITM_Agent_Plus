@@ -1,4 +1,4 @@
-// ITM_Agent_Plus/Services/OntoOntoLampLifeService.cs
+// ITM_Agent_Plus/Services/OntoLampLifeService.cs
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -27,7 +27,7 @@ namespace ITM_Agent.Services
         public string LastChanged;
     }
 
-    public class OntoOntoLampLifeService
+    public class OntoLampLifeService
     {
         private readonly SettingsManager _settingsManager;
         private readonly LogManager _logManager;
@@ -56,7 +56,7 @@ namespace ITM_Agent.Services
         {
             lock (_lock)
             {
-                if (_isRunning || !_settingsManager.IsLampLifeCollectorEnabled) return;
+                if (_isRunning || !_settingsManager.IsOntoLampLifeCollectorEnabled) return;
 
                 _isRunning = true;
                 _logManager.LogEvent($"[OntoLampLifeService] Service Started. (SkipUI: {skipUiAutomation})");
@@ -183,7 +183,6 @@ namespace ITM_Agent.Services
 
         private async Task SyncWithEquipmentDatabaseAsync(bool isInitialMapping)
         {
-            // [핵심 개선] 중복 실행 방지
             if (Interlocked.CompareExchange(ref _isSyncing, 1, 0) == 1) return;
 
             try
@@ -241,7 +240,7 @@ namespace ITM_Agent.Services
             }
             finally
             {
-                Interlocked.Exchange(ref _isSyncing, 0); // 락 해제
+                Interlocked.Exchange(ref _isSyncing, 0);
             }
         }
 
