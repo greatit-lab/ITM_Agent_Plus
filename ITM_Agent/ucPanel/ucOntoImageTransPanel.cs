@@ -1,4 +1,4 @@
-// ITM_Agent/ucPanel/ucImageTransPanel.cs
+// ITM_Agent_Plus/ucPanel/ucOntoImageTransPanel.cs
 using ITM_Agent.Services;
 using System;
 using System.Collections.Generic;
@@ -11,7 +11,7 @@ using System.Windows.Forms;
 
 namespace ITM_Agent.ucPanel
 {
-    public partial class ucImageTransPanel : UserControl
+    public partial class ucOntoImageTransPanel : UserControl
     {
         private static readonly HashSet<string> mergedBaseNames = new HashSet<string>();
         private readonly LogManager logManager;
@@ -32,7 +32,7 @@ namespace ITM_Agent.ucPanel
 
         public event Action ImageSaveFolderChanged;
 
-        public ucImageTransPanel(SettingsManager settingsManager, ucConfigurationPanel configPanel)
+        public ucOntoImageTransPanel(SettingsManager settingsManager, ucConfigurationPanel configPanel)
         {
             this.settingsManager = settingsManager ?? throw new ArgumentNullException(nameof(settingsManager));
             this.configPanel = configPanel ?? throw new ArgumentNullException(nameof(configPanel));
@@ -41,7 +41,7 @@ namespace ITM_Agent.ucPanel
             logManager = new LogManager(AppDomain.CurrentDomain.BaseDirectory);
             pdfMergeManager = new PdfMergeManager(AppDomain.CurrentDomain.BaseDirectory, logManager);
 
-            logManager.LogEvent("[ucImageTransPanel] Initialized");
+            logManager.LogEvent("[ucOntoImageTransPanel] Initialized");
 
             btn_SetFolder.Click += btn_SetFolder_Click;
             btn_FolderClear.Click += btn_FolderClear_Click;
@@ -94,7 +94,7 @@ namespace ITM_Agent.ucPanel
                 _pollingTimer = null;
             }
 
-            logManager.LogEvent($"[ucImageTransPanel] Status updated to {(runState ? "Running" : "Stopped")}");
+            logManager.LogEvent($"[ucOntoImageTransPanel] Status updated to {(runState ? "Running" : "Stopped")}");
         }
 
         private void ClearMergedBaseNames()
@@ -103,7 +103,7 @@ namespace ITM_Agent.ucPanel
             {
                 if (mergedBaseNames.Count > 0)
                 {
-                    logManager.LogEvent($"[ucImageTransPanel] Clearing {mergedBaseNames.Count} items from mergedBaseNames to prevent memory leak.");
+                    logManager.LogEvent($"[ucOntoImageTransPanel] Clearing {mergedBaseNames.Count} items from mergedBaseNames to prevent memory leak.");
                     mergedBaseNames.Clear();
                 }
             }
@@ -113,10 +113,11 @@ namespace ITM_Agent.ucPanel
         {
             StopWatchingFolder();
 
-            string targetFolder = settingsManager.GetValueFromSection("ImageTrans", "Target");
+            // [수정] 섹션명 분리
+            string targetFolder = settingsManager.GetValueFromSection("OntoImageTrans", "Target");
             if (string.IsNullOrEmpty(targetFolder) || !Directory.Exists(targetFolder))
             {
-                logManager.LogError("[ucImageTransPanel] Target folder not set or does not exist - cannot watch.");
+                logManager.LogError("[ucOntoImageTransPanel] Target folder not set or does not exist - cannot watch.");
                 return;
             }
 
@@ -135,7 +136,7 @@ namespace ITM_Agent.ucPanel
 
             imageWatcher.EnableRaisingEvents = true;
 
-            logManager.LogEvent($"[ucImageTransPanel] StartWatchingFolder - Folder: {targetFolder}");
+            logManager.LogEvent($"[ucOntoImageTransPanel] StartWatchingFolder - Folder: {targetFolder}");
         }
 
         private void StopWatchingFolder()
@@ -164,7 +165,8 @@ namespace ITM_Agent.ucPanel
         {
             if (!isRunning) return;
 
-            string targetFolder = settingsManager.GetValueFromSection("ImageTrans", "Target");
+            // [수정] 섹션명 분리
+            string targetFolder = settingsManager.GetValueFromSection("OntoImageTrans", "Target");
             if (string.IsNullOrEmpty(targetFolder) || !Directory.Exists(targetFolder)) return;
 
             try
@@ -212,7 +214,7 @@ namespace ITM_Agent.ucPanel
             }
             catch (Exception ex)
             {
-                logManager.LogDebug($"[ucImageTransPanel] Polling error: {ex.Message}");
+                logManager.LogDebug($"[ucOntoImageTransPanel] Polling error: {ex.Message}");
             }
         }
 
@@ -250,7 +252,7 @@ namespace ITM_Agent.ucPanel
                 checkTimer = new System.Threading.Timer(_ => CheckFilesAfterWait(), null, 1000, 1000);
             }
 
-            logManager.LogEvent($"[ucImageTransPanel] Detected valid file: {e.FullPath}");
+            logManager.LogEvent($"[ucOntoImageTransPanel] Detected valid file: {e.FullPath}");
         }
 
         private void CheckFilesAfterWait()
@@ -286,7 +288,7 @@ namespace ITM_Agent.ucPanel
                     }
                     catch (Exception ex)
                     {
-                        logManager.LogError($"[ucImageTransPanel] Merge error for file {filePath}: {ex.Message}");
+                        logManager.LogError($"[ucOntoImageTransPanel] Merge error for file {filePath}: {ex.Message}");
                     }
                 }
 
@@ -308,7 +310,8 @@ namespace ITM_Agent.ucPanel
 
         private int GetWaitSeconds()
         {
-            string waitStr = settingsManager.GetValueFromSection("ImageTrans", "Wait");
+            // [수정] 섹션명 분리
+            string waitStr = settingsManager.GetValueFromSection("OntoImageTrans", "Wait");
 
             if (cb_WaitTime.InvokeRequired)
             {
@@ -334,8 +337,6 @@ namespace ITM_Agent.ucPanel
             if (!m0.Success) return;
 
             string baseName = m0.Groups["base"].Value;
-
-            // [개선] 파일명에 포함된 '.' 및 '#' 기호를 언더바('_')로 치환하여 웹 환경(URL) 호환성 확보
             string safeBaseName = baseName.Replace('.', '_').Replace('#', '_');
 
             string folder = Path.GetDirectoryName(filePath);
@@ -345,7 +346,7 @@ namespace ITM_Agent.ucPanel
                 if (mergedBaseNames.Contains(baseName))
                 {
                     if (settingsManager.IsDebugMode)
-                        logManager.LogDebug($"[ucImageTransPanel] Skip duplicate merge: {baseName}");
+                        logManager.LogDebug($"[ucOntoImageTransPanel] Skip duplicate merge: {baseName}");
                     return;
                 }
                 mergedBaseNames.Add(baseName);
@@ -369,18 +370,19 @@ namespace ITM_Agent.ucPanel
 
             if (imgList.Count == 0) return;
 
-            string outputFolder = settingsManager.GetValueFromSection("ImageTrans", "SaveFolder");
+            // [수정] 섹션명 분리
+            string outputFolder = settingsManager.GetValueFromSection("OntoImageTrans", "SaveFolder");
             if (string.IsNullOrEmpty(outputFolder) || !Directory.Exists(outputFolder))
             {
                 outputFolder = folder;
-                logManager.LogEvent("[ucImageTransPanel] SaveFolder 미설정/미존재 ▶ 이미지 폴더로 대체 저장");
+                logManager.LogEvent("[ucOntoImageTransPanel] SaveFolder 미설정/미존재 ▶ 이미지 폴더로 대체 저장");
             }
 
             string outputPdfPath = Path.Combine(outputFolder, $"{safeBaseName}.pdf");
 
             pdfMergeManager.MergeImagesToPdf(imgList, outputPdfPath);
 
-            logManager.LogEvent($"[ucImageTransPanel] Created PDF: {outputPdfPath}");
+            logManager.LogEvent($"[ucOntoImageTransPanel] Created PDF: {outputPdfPath}");
         }
 
         #region ====== 기존 UI/설정 메서드 ======
@@ -401,11 +403,12 @@ namespace ITM_Agent.ucPanel
                 {
                     string selectedFolder = folderDialog.SelectedPath;
                     lb_ImageSaveFolder.Text = selectedFolder;
-                    settingsManager.SetValueToSection("ImageTrans", "SaveFolder", selectedFolder);
+                    // [수정] 섹션명 분리
+                    settingsManager.SetValueToSection("OntoImageTrans", "SaveFolder", selectedFolder);
 
                     ImageSaveFolderChanged?.Invoke();
 
-                    logManager.LogEvent($"[ucImageTransPanel] Output folder set: {selectedFolder}");
+                    logManager.LogEvent($"[ucOntoImageTransPanel] Output folder set: {selectedFolder}");
                     MessageBox.Show("출력 폴더가 설정되었습니다.", "알림", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             }
@@ -415,8 +418,9 @@ namespace ITM_Agent.ucPanel
         {
             if (cb_TargetImageFolder.SelectedItem is string selectedFolder)
             {
-                settingsManager.SetValueToSection("ImageTrans", "Target", selectedFolder);
-                logManager.LogEvent($"[ucImageTransPanel] Target folder set: {selectedFolder}");
+                // [수정] 섹션명 분리
+                settingsManager.SetValueToSection("OntoImageTrans", "Target", selectedFolder);
+                logManager.LogEvent($"[ucOntoImageTransPanel] Target folder set: {selectedFolder}");
                 MessageBox.Show($"폴더가 설정되었습니다: {selectedFolder}", "알림", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             else
@@ -430,9 +434,10 @@ namespace ITM_Agent.ucPanel
             if (cb_TargetImageFolder.SelectedItem != null)
             {
                 cb_TargetImageFolder.SelectedIndex = -1;
-                settingsManager.RemoveSection("ImageTrans");
+                // [수정] 섹션명 분리
+                settingsManager.RemoveSection("OntoImageTrans");
 
-                logManager.LogEvent("[ucImageTransPanel] Target folder cleared");
+                logManager.LogEvent("[ucOntoImageTransPanel] Target folder cleared");
                 MessageBox.Show("폴더 설정이 초기화되었습니다.", "알림", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             else
@@ -449,7 +454,8 @@ namespace ITM_Agent.ucPanel
 
             cb_TargetImageFolder.Items.AddRange(uniqueFolders);
 
-            string selectedPath = settingsManager.GetValueFromSection("ImageTrans", "Target");
+            // [수정] 섹션명 분리
+            string selectedPath = settingsManager.GetValueFromSection("OntoImageTrans", "Target");
             if (!string.IsNullOrEmpty(selectedPath) && cb_TargetImageFolder.Items.Contains(selectedPath))
             {
                 cb_TargetImageFolder.SelectedItem = selectedPath;
@@ -473,7 +479,8 @@ namespace ITM_Agent.ucPanel
             cb_WaitTime.Items.AddRange(new object[] { "30", "60", "120", "180", "240", "300" });
             cb_WaitTime.SelectedIndex = -1;
 
-            string savedWaitTime = settingsManager.GetValueFromSection("ImageTrans", "Wait");
+            // [수정] 섹션명 분리
+            string savedWaitTime = settingsManager.GetValueFromSection("OntoImageTrans", "Wait");
             if (!string.IsNullOrEmpty(savedWaitTime) && cb_WaitTime.Items.Contains(savedWaitTime))
             {
                 cb_WaitTime.SelectedItem = savedWaitTime;
@@ -484,8 +491,9 @@ namespace ITM_Agent.ucPanel
         {
             if (cb_WaitTime.SelectedItem is string selectedWaitTime && int.TryParse(selectedWaitTime, out int waitTime))
             {
-                settingsManager.SetValueToSection("ImageTrans", "Wait", selectedWaitTime);
-                logManager.LogEvent($"[ucImageTransPanel] Wait time set: {waitTime} seconds");
+                // [수정] 섹션명 분리
+                settingsManager.SetValueToSection("OntoImageTrans", "Wait", selectedWaitTime);
+                logManager.LogEvent($"[ucOntoImageTransPanel] Wait time set: {waitTime} seconds");
                 MessageBox.Show($"대기 시간이 {waitTime}초로 설정되었습니다.", "알림", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             else
@@ -499,9 +507,10 @@ namespace ITM_Agent.ucPanel
             if (cb_WaitTime.SelectedItem != null)
             {
                 cb_WaitTime.SelectedIndex = -1;
-                settingsManager.SetValueToSection("ImageTrans", "Wait", string.Empty);
+                // [수정] 섹션명 분리
+                settingsManager.SetValueToSection("OntoImageTrans", "Wait", string.Empty);
 
-                logManager.LogEvent("[ucImageTransPanel] Wait time cleared");
+                logManager.LogEvent("[ucOntoImageTransPanel] Wait time cleared");
                 MessageBox.Show("대기 시간이 초기화되었습니다.", "알림", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             else
@@ -512,7 +521,8 @@ namespace ITM_Agent.ucPanel
 
         private void LoadOutputFolder()
         {
-            string outputFolder = settingsManager.GetValueFromSection("ImageTrans", "SaveFolder");
+            // [수정] 섹션명 분리
+            string outputFolder = settingsManager.GetValueFromSection("OntoImageTrans", "SaveFolder");
 
             if (!string.IsNullOrEmpty(outputFolder) && Directory.Exists(outputFolder))
             {
