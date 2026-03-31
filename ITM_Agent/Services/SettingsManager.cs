@@ -1,4 +1,4 @@
-// ITM_Agent/Services/SettingsManager.cs
+// ITM_Agent_Plus/Services/SettingsManager.cs
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -9,6 +9,7 @@ namespace ITM_Agent.Services
     /// <summary>
     /// Settings.ini 파일을 관리하며, 특정 섹션([Eqpid], [BaseFolder], [TargetFolders], [ExcludeFolders], [Regex]) 값들을
     /// 읽고/쓰고/수정하는 기능을 제공하는 클래스입니다.
+    /// 공통 기능과 Maker 전용(Onto 등) 섹션을 분리하여 관리합니다.
     /// </summary>
     public class SettingsManager
     {
@@ -18,7 +19,7 @@ namespace ITM_Agent.Services
         public event Action RegexSettingsUpdated;
 
         private bool isDebugMode; // DebugMode 상태 저장
-        private bool isPerformanceLogging;    // [추가] 성능 로깅
+        private bool isPerformanceLogging;    // 성능 로깅
 
         public SettingsManager(string settingsFilePath)
         {
@@ -31,42 +32,42 @@ namespace ITM_Agent.Services
             EnsureSettingsFileExists();
         }
 
-        // AutoRunOnStart 속성 (Agent 섹션)
+        // AutoRunOnStart 속성 (Agent 섹션 - 공통)
         public bool AutoRunOnStart
         {
             get => GetValueFromSection("Agent", "AutoRunOnStart") == "1";
             set => SetValueToSection("Agent", "AutoRunOnStart", value ? "1" : "0");
         }
 
-        // DebugMode 속성 추가
+        // DebugMode 속성 (공통)
         public bool IsDebugMode
         {
             get => isDebugMode;
             set
             {
                 isDebugMode = value;
-                // 필요시 설정 파일에 저장하거나 관련 작업 수행 가능
             }
         }
 
+        // 성능 로깅 속성 (Option 섹션 - 공통)
         public bool IsPerformanceLogging
         {
             get => GetValueFromSection("Option", "EnablePerfoLog") == "1";
             set
             {
-                isPerformanceLogging = value;                    // 메모리 보존
-                SetValueToSection("Option", "EnablePerfoLog",    // INI 반영
-                                  value ? "1" : "0");
+                isPerformanceLogging = value;                    
+                SetValueToSection("Option", "EnablePerfoLog", value ? "1" : "0");
             }
         }
 
+        // 정보 자동 삭제 속성 (Option 섹션 - 공통)
         public bool IsInfoDeletionEnabled
         {
             get => GetValueFromSection("Option", "EnableInfoAutoDel") == "1";
-            set => SetValueToSection("Option", "EnableInfoAutoDel",
-                                      value ? "1" : "0");
+            set => SetValueToSection("Option", "EnableInfoAutoDel", value ? "1" : "0");
         }
 
+        // 정보 보존 기간 속성 (Option 섹션 - 공통)
         public int InfoRetentionDays
         {
             get
@@ -74,28 +75,31 @@ namespace ITM_Agent.Services
                 var raw = GetValueFromSection("Option", "InfoRetentionDays");
                 return int.TryParse(raw, out var d) ? d : 1;
             }
-            set => SetValueToSection("Option", "InfoRetentionDays",
-                                     value.ToString());
+            set => SetValueToSection("Option", "InfoRetentionDays", value.ToString());
         }
 
-        public bool IsLampLifeCollectorEnabled
+        // ─────────────────────────────────────────────────────────────
+        // [Onto 전용 속성] Lamp Life Collector
+        // INI 섹션명: [OntoLampLife] 로 명시적 분리
+        // ─────────────────────────────────────────────────────────────
+        public bool IsOntoLampLifeCollectorEnabled
         {
-            get => GetValueFromSection("LampLifeCollector", "Enabled") == "1";
-            set => SetValueToSection("LampLifeCollector", "Enabled", value ? "1" : "0");
+            get => GetValueFromSection("OntoLampLife", "Enabled") == "1";
+            set => SetValueToSection("OntoLampLife", "Enabled", value ? "1" : "0");
         }
 
-        public int LampLifeCollectorInterval
+        public int OntoLampLifeCollectorInterval
         {
             get
             {
-                var raw = GetValueFromSection("LampLifeCollector", "IntervalMinutes");
+                var raw = GetValueFromSection("OntoLampLife", "IntervalMinutes");
                 if (int.TryParse(raw, out int interval) && interval > 0)
                 {
                     return interval;
                 }
                 return 60; // 기본값 60분
             }
-            set => SetValueToSection("LampLifeCollector", "IntervalMinutes", value.ToString());
+            set => SetValueToSection("OntoLampLife", "IntervalMinutes", value.ToString());
         }
 
         private void EnsureSettingsFileExists()
@@ -133,9 +137,6 @@ namespace ITM_Agent.Services
             {
                 lock (fileLock)
                 {
-                    // File.WriteAllLines(settingsFilePath, lines);   // ❌ 로그 없음
-
-                    // ===== 개선 =====
                     File.WriteAllLines(settingsFilePath, lines);
                     logManager.LogEvent($"[SettingsManager] Wrote {lines.Length} lines -> {settingsFilePath}");
                 }
@@ -143,7 +144,7 @@ namespace ITM_Agent.Services
             catch (Exception ex)
             {
                 logManager.LogError($"[SettingsManager] WRITE failed: {ex.Message}");
-                throw; // 상위 호출부에도 예외 전달
+                throw; 
             }
         }
 
@@ -165,6 +166,7 @@ namespace ITM_Agent.Services
             WriteToFileSafely(lines.ToArray());
         }
 
+        // 공통 기능인 Categorize 설정들이 존재하는지 확인
         public bool IsReadyToRun()
         {
             return HasValuesInSection("[BaseFolder]") &&
@@ -243,11 +245,6 @@ namespace ITM_Agent.Services
             return regexList;
         }
 
-        /// <summary>
-        /// 해당 section에 folders 목록을 반영하는 메서드.
-        /// section이 이미 존재한다면 기존 내용을 삭제하고 folders를 기록.
-        /// section이 없다면 새로 추가.
-        /// </summary>
         public void SetFoldersToSection(string section, List<string> folders)
         {
             var lines = File.Exists(settingsFilePath) ? File.ReadAllLines(settingsFilePath).ToList() : new List<string>();
@@ -255,7 +252,6 @@ namespace ITM_Agent.Services
             int sectionIndex = lines.FindIndex(l => l.Trim() == section);
             if (sectionIndex == -1)
             {
-                // 섹션이 없으면 추가
                 if (lines.Count > 0 && !string.IsNullOrWhiteSpace(lines.Last()))
                 {
                     lines.Add("");
@@ -265,15 +261,13 @@ namespace ITM_Agent.Services
                 {
                     lines.Add(folder);
                 }
-                lines.Add(""); // 다음 섹션과 구분을 위해 빈 줄 추가(선택 사항)
+                lines.Add(""); 
             }
             else
             {
-                // 섹션이 있을 경우 endIndex 찾기
                 int endIndex = lines.FindIndex(sectionIndex + 1, line => line.StartsWith("[") || string.IsNullOrWhiteSpace(line));
                 if (endIndex == -1) endIndex = lines.Count;
 
-                // 기존 섹션 내용을 제거하고 새로운 목록 삽입
                 lines.RemoveRange(sectionIndex + 1, endIndex - sectionIndex - 1);
 
                 foreach (var folder in folders)
@@ -282,7 +276,6 @@ namespace ITM_Agent.Services
                     sectionIndex++;
                 }
 
-                // 마지막에 빈 줄 추가
                 if (lines.Count > 0 && !string.IsNullOrWhiteSpace(lines.Last()))
                 {
                     lines.Add("");
@@ -291,9 +284,6 @@ namespace ITM_Agent.Services
             File.WriteAllLines(settingsFilePath, lines);
         }
 
-        /// <summary>
-        /// BaseFolder를 설정하는 메서드
-        /// </summary>
         public void SetBaseFolder(string folderPath)
         {
             var lines = File.Exists(settingsFilePath) ? File.ReadAllLines(settingsFilePath).ToList() : new List<string>();
@@ -301,7 +291,6 @@ namespace ITM_Agent.Services
             int sectionIndex = lines.FindIndex(l => l.Trim() == "[BaseFolder]");
             if (sectionIndex == -1)
             {
-                // 섹션 없으면 추가
                 if (lines.Count > 0 && !string.IsNullOrWhiteSpace(lines.Last()))
                 {
                     lines.Add("");
@@ -331,7 +320,6 @@ namespace ITM_Agent.Services
                 ? File.ReadAllLines(settingsFilePath).ToList()
                 : new List<string>();
 
-            // ① 기존 [Regex] 섹션 삭제
             int sectionIndex = lines.FindIndex(l => l.Trim() == "[Regex]");
             if (sectionIndex != -1)
             {
@@ -341,7 +329,6 @@ namespace ITM_Agent.Services
                 lines.RemoveRange(sectionIndex, endIndex - sectionIndex);
             }
 
-            // ② 새 [Regex] 섹션 작성
             if (lines.Count > 0 && !string.IsNullOrWhiteSpace(lines.Last()))
                 lines.Add("");
 
@@ -350,28 +337,15 @@ namespace ITM_Agent.Services
                 lines.Add($"{kvp.Key} -> {kvp.Value}");
             lines.Add("");
 
-            // ③ **한 번만 저장**  // [수정]
             File.WriteAllLines(settingsFilePath, lines);
 
-            // File.WriteAllLines(settingsFilePath, ConvertRegexListToLines(regexDict)); // [삭제]
-
-            // ④ 변경 알림
             NotifyRegexSettingsUpdated();
-        }
-
-        private IEnumerable<string> ConvertRegexListToLines(Dictionary<string, string> regexDict)
-        {
-            var lines = new List<string> { "[Regex]" };
-            lines.AddRange(regexDict.Select(kvp => $"{kvp.Key} -> {kvp.Value}"));
-            return lines;
         }
 
         public void ResetExceptEqpid()
         {
-            // 설정 파일의 모든 라인을 읽어옴
             var lines = File.ReadAllLines(settingsFilePath).ToList();
 
-            // [Eqpid] 섹션 시작과 끝 라인 찾기
             int eqpidStartIndex = lines.FindIndex(line => line.Trim().Equals("[Eqpid]", StringComparison.OrdinalIgnoreCase));
             int eqpidEndIndex = lines.FindIndex(eqpidStartIndex + 1, line => line.StartsWith("[") || string.IsNullOrWhiteSpace(line));
 
@@ -380,17 +354,11 @@ namespace ITM_Agent.Services
                 throw new InvalidOperationException("[Eqpid] 섹션이 설정 파일에 존재하지 않습니다.");
             }
 
-            // [Eqpid] 섹션의 내용을 보존
             eqpidEndIndex = (eqpidEndIndex == -1) ? lines.Count : eqpidEndIndex;
             var eqpidSectionLines = lines.Skip(eqpidStartIndex).Take(eqpidEndIndex - eqpidStartIndex).ToList();
 
-            // 설정 파일 초기화
             File.WriteAllText(settingsFilePath, string.Empty);
-
-            // [Eqpid] 섹션 복원
             File.AppendAllLines(settingsFilePath, eqpidSectionLines);
-
-            // 추가 공백 라인 추가
             File.AppendAllText(settingsFilePath, Environment.NewLine);
         }
 
@@ -458,9 +426,6 @@ namespace ITM_Agent.Services
             return null;
         }
 
-        /// <summary>
-        /// 특정 섹션에서 키 값을 읽어옵니다.
-        /// </summary>
         public string GetValueFromSection(string section, string key)
         {
             if (!File.Exists(settingsFilePath)) return null;
@@ -492,9 +457,6 @@ namespace ITM_Agent.Services
             return null;
         }
 
-        /// <summary>
-        /// 특정 섹션에 키-값을 설정합니다.
-        /// </summary>
         public void SetValueToSection(string section, string key, string value)
         {
             lock (fileLock)
@@ -504,17 +466,15 @@ namespace ITM_Agent.Services
 
                 if (sectionIndex == -1)
                 {
-                    // 섹션 추가
                     if (lines.Count > 0 && !string.IsNullOrWhiteSpace(lines.Last()))
                     {
-                        lines.Add(""); // 섹션 구분 공백
+                        lines.Add(""); 
                     }
                     lines.Add($"[{section}]");
                     lines.Add($"{key} = {value}");
                 }
                 else
                 {
-                    // 섹션 내 키값 업데이트
                     int endIndex = lines.FindIndex(sectionIndex + 1, l => l.StartsWith("[") || string.IsNullOrWhiteSpace(l));
                     if (endIndex == -1) endIndex = lines.Count;
 
@@ -539,10 +499,6 @@ namespace ITM_Agent.Services
             }
         }
 
-
-        /// <summary>
-        /// 섹션 전체를 삭제합니다.
-        /// </summary>
         public void RemoveSection(string section)
         {
             var lines = File.Exists(settingsFilePath) ? File.ReadAllLines(settingsFilePath).ToList() : new List<string>();
@@ -590,20 +546,15 @@ namespace ITM_Agent.Services
 
         public void NotifyRegexSettingsUpdated()
         {
-            // 변경 알림 이벤트 호출
             RegexSettingsUpdated?.Invoke();
-
-            // 변경된 내용을 강제로 다시 로드
             ReloadSettings();
         }
 
         private void ReloadSettings()
         {
-            // 현재 설정 파일 다시 읽기
             if (File.Exists(settingsFilePath))
             {
                 var lines = File.ReadAllLines(settingsFilePath);
-                // 내부 데이터 구조 갱신
             }
         }
 
@@ -612,10 +563,10 @@ namespace ITM_Agent.Services
             var baseFolders = GetFoldersFromSection("[BaseFolder]");
             if (baseFolders.Count > 0)
             {
-                return baseFolders[0];  // 첫 번째 BaseFolder 반환
+                return baseFolders[0]; 
             }
 
-            return null; // BaseFolder가 없는 경우 null 반환
+            return null; 
         }
 
         public void RemoveKeyFromSection(string section, string key)
@@ -623,7 +574,6 @@ namespace ITM_Agent.Services
             if (!File.Exists(settingsFilePath))
                 return;
 
-            // 파일의 모든 줄을 읽어옵니다.
             var lines = File.ReadAllLines(settingsFilePath).ToList();
             bool inSection = false;
 
@@ -632,29 +582,23 @@ namespace ITM_Agent.Services
                 string line = lines[i];
                 string trimmed = line.Trim();
 
-                // 지정 섹션의 시작을 찾습니다.
                 if (trimmed.Equals($"[{section}]", StringComparison.OrdinalIgnoreCase))
                 {
                     inSection = true;
                     continue;
                 }
 
-                // 섹션 내부에 있다면
                 if (inSection)
                 {
-                    // 새로운 섹션이 시작되면 종료
                     if (trimmed.StartsWith("[") && trimmed.EndsWith("]"))
                         break;
 
-                    // '=' 문자의 인덱스를 찾습니다.
                     int equalIndex = line.IndexOf('=');
                     if (equalIndex >= 0)
                     {
-                        // '=' 왼쪽의 키 부분을 추출합니다.
                         string currentKey = line.Substring(0, equalIndex).Trim();
                         if (currentKey.Equals(key, StringComparison.OrdinalIgnoreCase))
                         {
-                            // 해당 줄을 삭제하고 인덱스를 하나 줄입니다.
                             lines.RemoveAt(i);
                             i--;
                         }
