@@ -120,15 +120,13 @@ namespace ITM_Agent
             // 
             // menuStrip1
             // 
-            this.menuStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[]
-            {
-                this.파일ToolStripMenuItem1,
-                this.toolStripMenuItem8,
-                this.tsm_Onto,
-                this.tsm_Nova,
-                this.tsm_Plugin,
-                this.tsm_About
-            });
+            this.menuStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.파일ToolStripMenuItem1,
+            this.toolStripMenuItem8,
+            this.tsm_Onto,
+            this.tsm_Nova,
+            this.tsm_Plugin,
+            this.tsm_About});
             this.menuStrip1.Location = new System.Drawing.Point(0, 0);
             this.menuStrip1.Name = "menuStrip1";
             this.menuStrip1.Size = new System.Drawing.Size(676, 24);
@@ -137,15 +135,13 @@ namespace ITM_Agent
             // 
             // 파일ToolStripMenuItem1
             // 
-            this.파일ToolStripMenuItem1.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[]
-            {
-                this.newToolStripMenuItem,
-                this.openToolStripMenuItem,
-                this.toolStripSeparator7,
-                this.saveAsToolStripMenuItem,
-                this.toolStripSeparator8,
-                this.quitToolStripMenuItem
-            });
+            this.파일ToolStripMenuItem1.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.newToolStripMenuItem,
+            this.openToolStripMenuItem,
+            this.toolStripSeparator7,
+            this.saveAsToolStripMenuItem,
+            this.toolStripSeparator8,
+            this.quitToolStripMenuItem});
             this.파일ToolStripMenuItem1.Name = "파일ToolStripMenuItem1";
             this.파일ToolStripMenuItem1.Size = new System.Drawing.Size(37, 20);
             this.파일ToolStripMenuItem1.Text = "File";
@@ -193,12 +189,10 @@ namespace ITM_Agent
             // 
             // toolStripMenuItem8
             // 
-            this.toolStripMenuItem8.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[]
-            {
-                this.tsm_Categorize,
-                this.toolStripSeparator9,
-                this.tsm_Option
-            });
+            this.toolStripMenuItem8.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.tsm_Categorize,
+            this.toolStripSeparator9,
+            this.tsm_Option});
             this.toolStripMenuItem8.Name = "toolStripMenuItem8";
             this.toolStripMenuItem8.Size = new System.Drawing.Size(70, 20);
             this.toolStripMenuItem8.Text = "Common";
@@ -222,13 +216,11 @@ namespace ITM_Agent
             // 
             // tsm_Onto
             // 
-            this.tsm_Onto.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[]
-            {
-                this.tsm_OverrideNames,
-                this.tsm_ImageTrans,
-                this.tsm_UploadData,
-                this.tsm_LampLifeCollector
-            });
+            this.tsm_Onto.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.tsm_OverrideNames,
+            this.tsm_ImageTrans,
+            this.tsm_UploadData,
+            this.tsm_LampLifeCollector});
             this.tsm_Onto.Name = "tsm_Onto";
             this.tsm_Onto.Size = new System.Drawing.Size(52, 20);
             this.tsm_Onto.Text = "ONTO";
@@ -259,12 +251,10 @@ namespace ITM_Agent
             // 
             // tsm_Nova
             // 
-            this.tsm_Nova.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[]
-            {
-                this.toolStripMenuItem4,
-                this.toolStripMenuItem5,
-                this.toolStripMenuItem6
-            });
+            this.tsm_Nova.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.toolStripMenuItem4,
+            this.toolStripMenuItem5,
+            this.toolStripMenuItem6});
             this.tsm_Nova.Name = "tsm_Nova";
             this.tsm_Nova.Size = new System.Drawing.Size(53, 20);
             this.tsm_Nova.Text = "NOVA";
@@ -289,10 +279,8 @@ namespace ITM_Agent
             // 
             // tsm_Plugin
             // 
-            this.tsm_Plugin.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[]
-            {
-                this.tsm_PluginList
-            });
+            this.tsm_Plugin.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.tsm_PluginList});
             this.tsm_Plugin.Name = "tsm_Plugin";
             this.tsm_Plugin.Size = new System.Drawing.Size(53, 20);
             this.tsm_Plugin.Text = "Plugin";
@@ -305,10 +293,8 @@ namespace ITM_Agent
             // 
             // tsm_About
             // 
-            this.tsm_About.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[]
-            {
-                this.tsm_AboutInfo
-            });
+            this.tsm_About.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.tsm_AboutInfo});
             this.tsm_About.Name = "tsm_About";
             this.tsm_About.Size = new System.Drawing.Size(52, 20);
             this.tsm_About.Text = "About";
@@ -431,10 +417,8 @@ namespace ITM_Agent
             // 
             // statusStrip1
             // 
-            this.statusStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[]
-            {
-                this.ts_Status
-            });
+            this.statusStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.ts_Status});
             this.statusStrip1.Location = new System.Drawing.Point(0, 409);
             this.statusStrip1.Name = "statusStrip1";
             this.statusStrip1.Size = new System.Drawing.Size(676, 22);
