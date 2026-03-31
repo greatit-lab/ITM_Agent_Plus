@@ -1,4 +1,4 @@
-// ITM_Agent/ucPanel/ucUploadPanel.cs
+// ITM_Agent_Plus/ucPanel/ucOntoUploadPanel.cs
 using ITM_Agent.Plugins;
 using ITM_Agent.Services;
 using System;
@@ -19,7 +19,7 @@ using System.Diagnostics;
 
 namespace ITM_Agent.ucPanel
 {
-    public partial class ucUploadPanel : UserControl
+    public partial class ucOntoUploadPanel : UserControl
     {
         private readonly List<FileSystemWatcher> _tab1Watchers = new List<FileSystemWatcher>();
         private readonly List<FileSystemWatcher> _tab2Watchers = new List<FileSystemWatcher>();
@@ -28,7 +28,6 @@ namespace ITM_Agent.ucPanel
         private readonly object _lockTab1 = new object();
         private readonly object _lockTab2 = new object();
 
-        // 파일별 슬라이딩 윈도우 타이머
         private readonly ConcurrentDictionary<string, System.Threading.Timer> _tab1Timers = new ConcurrentDictionary<string, System.Threading.Timer>(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, System.Threading.Timer> _tab2Timers = new ConcurrentDictionary<string, System.Threading.Timer>(StringComparer.OrdinalIgnoreCase);
         private const int DebounceDelayMs = 1000; // 1초 대기
@@ -37,8 +36,8 @@ namespace ITM_Agent.ucPanel
         private readonly ucPluginPanel _pluginPanel;
         private readonly SettingsManager _settingsManager;
         private readonly LogManager _logManager;
-        private readonly ucOverrideNamesPanel _overridePanel;
-        private readonly ucImageTransPanel _imageTransPanel;
+        private readonly ucOntoOverrideNamesPanel _overridePanel;
+        private readonly ucOntoImageTransPanel _imageTransPanel;
 
         private readonly Dictionary<string, (string Task, string Filter, bool RequiresOverride)> _pluginMetadataCache =
             new Dictionary<string, (string Task, string Filter, bool RequiresOverride)>(StringComparer.OrdinalIgnoreCase);
@@ -61,14 +60,14 @@ namespace ITM_Agent.ucPanel
             public string Filter { get; set; }
         }
 
-        private const string Tab1Section = "[UploadRulesTab1]";
-        private const string Tab2Section = "[UploadRulesTab2]";
+        private const string Tab1Section = "[OntoUploadRulesTab1]";
+        private const string Tab2Section = "[OntoUploadRulesTab2]";
 
         private bool isRunning = false;
         private bool isPaused = false;
 
-        public ucUploadPanel(ucConfigurationPanel configPanel, ucPluginPanel pluginPanel, SettingsManager settingsManager,
-            ucOverrideNamesPanel ovPanel, ucImageTransPanel imageTransPanel)
+        public ucOntoUploadPanel(ucConfigurationPanel configPanel, ucPluginPanel pluginPanel, SettingsManager settingsManager,
+            ucOntoOverrideNamesPanel ovPanel, ucOntoImageTransPanel imageTransPanel)
         {
             InitializeComponent();
 
@@ -128,7 +127,7 @@ namespace ITM_Agent.ucPanel
                 try
                 {
                     if (_settingsManager.IsDebugMode)
-                        _logManager.LogDebug($"[ucUploadPanel] Direct Signal Received from OverridePanel: {newFilePath}");
+                        _logManager.LogDebug($"[ucOntoUploadPanel] Direct Signal Received from OverridePanel: {newFilePath}");
 
                     string dir = Path.GetDirectoryName(newFilePath);
                     string name = Path.GetFileName(newFilePath);
@@ -138,7 +137,7 @@ namespace ITM_Agent.ucPanel
                 }
                 catch (Exception ex)
                 {
-                    _logManager.LogError($"[ucUploadPanel] Direct Signal Processing Failed: {ex.Message}");
+                    _logManager.LogError($"[ucOntoUploadPanel] Direct Signal Processing Failed: {ex.Message}");
                 }
             });
         }
@@ -266,7 +265,7 @@ namespace ITM_Agent.ucPanel
                 }
             }
             _settingsManager.SetFoldersToSection(section, lines);
-            _logManager.LogEvent($"[ucUploadPanel] Settings saved for section: {section}");
+            _logManager.LogEvent($"[ucOntoUploadPanel] Settings saved for section: {section}");
         }
 
         private void BtnCatAdd_Click(object sender, EventArgs e) { int idx = dgvCategorized.Rows.Add(); dgvCategorized.Rows[idx].Cells["TaskName"].Value = "New Task"; }
@@ -300,7 +299,7 @@ namespace ITM_Agent.ucPanel
             if (!isRunning) return;
             isPaused = true;
             StopWatchers();
-            _logManager.LogEvent("[ucUploadPanel] Watchers Paused (Server Holding).");
+            _logManager.LogEvent("[ucOntoUploadPanel] Watchers Paused (Server Holding).");
         }
 
         public void ResumeWatching()
@@ -309,7 +308,7 @@ namespace ITM_Agent.ucPanel
             isPaused = false;
             StopWatchers();
             InitializeWatchers();
-            _logManager.LogEvent("[ucUploadPanel] Watchers Resumed.");
+            _logManager.LogEvent("[ucOntoUploadPanel] Watchers Resumed.");
         }
 
         public void UpdateStatusOnRun(bool isRunning)
@@ -330,7 +329,7 @@ namespace ITM_Agent.ucPanel
 
         private void InitializeWatchers()
         {
-            _logManager.LogEvent("[ucUploadPanel] Initializing watchers...");
+            _logManager.LogEvent("[ucOntoUploadPanel] Initializing watchers...");
             InitializeComboBoxColumns();
 
             lock (_lockTab1)
@@ -367,7 +366,7 @@ namespace ITM_Agent.ucPanel
                         watcher.Changed += OnTab1FileEvent;
                         _tab1Watchers.Add(watcher);
                     }
-                    catch (Exception ex) { _logManager.LogError($"[ucUploadPanel] Tab1 Watcher Failed: {ex.Message}"); }
+                    catch (Exception ex) { _logManager.LogError($"[ucOntoUploadPanel] Tab1 Watcher Failed: {ex.Message}"); }
                 }
             }
 
@@ -401,7 +400,7 @@ namespace ITM_Agent.ucPanel
                         string mapKey = $"{NormalizePath(folder)}|{filter.ToUpperInvariant()}";
                         _tab2RuleMap[mapKey] = plugin;
                     }
-                    catch (Exception ex) { _logManager.LogError($"[ucUploadPanel] Tab2 Watcher Error: {ex.Message}"); }
+                    catch (Exception ex) { _logManager.LogError($"[ucOntoUploadPanel] Tab2 Watcher Error: {ex.Message}"); }
                 }
             }
         }
@@ -422,12 +421,12 @@ namespace ITM_Agent.ucPanel
                 foreach (var t in _tab2Timers.Values) { try { t.Dispose(); } catch { } }
                 _tab2Timers.Clear();
             }
-            _logManager.LogEvent("[ucUploadPanel] All watchers and timers stopped.");
+            _logManager.LogEvent("[ucOntoUploadPanel] All watchers and timers stopped.");
         }
 
         #endregion
 
-        #region --- ⭐️ 타이머 기반 이벤트 처리 (Lock 폭풍 완벽 방지) ---
+        #region --- 타이머 기반 이벤트 처리 (Lock 폭풍 완벽 방지) ---
 
         private bool WaitForFileReady(string filePath, int timeoutSeconds = 60)
         {
@@ -451,7 +450,6 @@ namespace ITM_Agent.ucPanel
 
         private void OnTab1FileEvent(object sender, FileSystemEventArgs e)
         {
-            // ⭐️ [핵심 방어] 파일명에 _#숫자_ 패턴이 포함되어 있으면 Override 처리가 우선이므로 메인 업로드 타이머를 가동하지 않습니다.
             if (Regex.IsMatch(e.Name, @"_#\d+_") || isPaused) return;
 
             string fileKey = e.FullPath.ToUpperInvariant();
@@ -499,7 +497,6 @@ namespace ITM_Agent.ucPanel
 
         private void OnTab2FileChanged(object sender, FileSystemEventArgs e)
         {
-            // ⭐️ [핵심 방어] 파일명에 _#숫자_ 패턴이 포함되어 있으면 무시하여 Override 로직과 충돌 방지
             if (Regex.IsMatch(e.Name, @"_#\d+_") || isPaused) return;
 
             string fileKey = e.FullPath.ToUpperInvariant();
@@ -583,7 +580,7 @@ namespace ITM_Agent.ucPanel
                     }
                     catch (Exception ex)
                     {
-                        _logManager.LogError($"[ucUploadPanel] Error loading plugin assembly {pluginName}: {ex.Message}");
+                        _logManager.LogError($"[ucOntoUploadPanel] Error loading plugin assembly {pluginName}: {ex.Message}");
                         return;
                     }
                 }
@@ -601,11 +598,11 @@ namespace ITM_Agent.ucPanel
                     Task.Run(() =>
                     {
                         try { runtimeInfo.Method.Invoke(pluginObj, args); }
-                        catch (Exception ex) { _logManager.LogError($"[ucUploadPanel] Plugin execution failed: {pluginName}. Error: {ex.GetBaseException().Message}"); }
+                        catch (Exception ex) { _logManager.LogError($"[ucOntoUploadPanel] Plugin execution failed: {pluginName}. Error: {ex.GetBaseException().Message}"); }
                     });
                 }
             }
-            catch (Exception ex) { _logManager.LogError($"[ucUploadPanel] Failed to run plugin {pluginName}: {ex.GetBaseException().Message}"); }
+            catch (Exception ex) { _logManager.LogError($"[ucOntoUploadPanel] Failed to run plugin {pluginName}: {ex.GetBaseException().Message}"); }
         }
 
         #endregion
