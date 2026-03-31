@@ -41,20 +41,20 @@ namespace ITM_Agent
             this.picIcon.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
             this.picIcon.TabIndex = 0;
             this.picIcon.TabStop = false;
-            //
+            // 
             // lblTitle
-            //
+            // 
             this.lblTitle.AutoSize = true;
             this.lblTitle.Font = new System.Drawing.Font("Segoe UI", 13F, System.Drawing.FontStyle.Bold);
             this.lblTitle.ForeColor = System.Drawing.Color.DarkOrange;
-            this.lblTitle.Location = new System.Drawing.Point(12, 19);
+            this.lblTitle.Location = new System.Drawing.Point(12, 15);
             this.lblTitle.Name = "lblTitle";
             this.lblTitle.Size = new System.Drawing.Size(116, 25);
             this.lblTitle.TabIndex = 1;
             this.lblTitle.Text = "ITM Agent+";
-            //
+            // 
             // grpDev
-            //
+            // 
             this.grpDev.Controls.Add(this.label5);
             this.grpDev.Controls.Add(this.lblDevList);
             this.grpDev.Location = new System.Drawing.Point(175, 149);
@@ -63,27 +63,27 @@ namespace ITM_Agent
             this.grpDev.TabIndex = 3;
             this.grpDev.TabStop = false;
             this.grpDev.Text = "Developers";
-            //
+            // 
             // label5
-            //
+            // 
             this.label5.AutoSize = true;
             this.label5.Location = new System.Drawing.Point(27, 40);
             this.label5.Name = "label5";
             this.label5.Size = new System.Drawing.Size(202, 12);
             this.label5.TabIndex = 1;
             this.label5.Text = "(Memory CMP Technology Team)";
-            //
+            // 
             // lblDevList
-            //
+            // 
             this.lblDevList.AutoSize = true;
             this.lblDevList.Location = new System.Drawing.Point(22, 20);
             this.lblDevList.Name = "lblDevList";
             this.lblDevList.Size = new System.Drawing.Size(157, 12);
             this.lblDevList.TabIndex = 0;
             this.lblDevList.Text = "• gily.choi@samsung.com";
-            //
+            // 
             // btnOk
-            //
+            // 
             this.btnOk.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.btnOk.DialogResult = System.Windows.Forms.DialogResult.OK;
             this.btnOk.Location = new System.Drawing.Point(315, 212);
@@ -91,53 +91,53 @@ namespace ITM_Agent
             this.btnOk.Size = new System.Drawing.Size(94, 23);
             this.btnOk.TabIndex = 4;
             this.btnOk.Text = "OK";
-            //
+            // 
             // lb_Version
-            //
+            // 
             this.lb_Version.AutoSize = true;
             this.lb_Version.Font = new System.Drawing.Font("Segoe UI", 12F, System.Drawing.FontStyle.Bold);
             this.lb_Version.ForeColor = System.Drawing.Color.DarkOrange;
-            this.lb_Version.Location = new System.Drawing.Point(121, 22);
+            this.lb_Version.Location = new System.Drawing.Point(121, 18);
             this.lb_Version.Name = "lb_Version";
             this.lb_Version.Size = new System.Drawing.Size(35, 21);
             this.lb_Version.TabIndex = 5;
             this.lb_Version.Text = "Ver";
-            //
+            // 
             // label1
-            //
+            // 
             this.label1.AutoSize = true;
             this.label1.Location = new System.Drawing.Point(172, 53);
             this.label1.Name = "label1";
             this.label1.Size = new System.Drawing.Size(0, 12);
             this.label1.TabIndex = 6;
-            //
+            // 
             // label2
-            //
+            // 
             this.label2.AutoSize = true;
             this.label2.Location = new System.Drawing.Point(172, 75);
             this.label2.Name = "label2";
             this.label2.Size = new System.Drawing.Size(0, 12);
             this.label2.TabIndex = 7;
-            //
+            // 
             // label3
-            //
+            // 
             this.label3.AutoSize = true;
             this.label3.Location = new System.Drawing.Point(173, 97);
             this.label3.Name = "label3";
             this.label3.Size = new System.Drawing.Size(0, 12);
             this.label3.TabIndex = 8;
-            //
+            // 
             // label4
-            //
+            // 
             this.label4.AutoSize = true;
             this.label4.BackColor = System.Drawing.SystemColors.Control;
             this.label4.Location = new System.Drawing.Point(173, 117);
             this.label4.Name = "label4";
             this.label4.Size = new System.Drawing.Size(0, 12);
             this.label4.TabIndex = 9;
-            //
+            // 
             // AboutInfoForm
-            //
+            // 
             this.AcceptButton = this.btnOk;
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.None;
             this.ClientSize = new System.Drawing.Size(420, 240);
@@ -162,7 +162,6 @@ namespace ITM_Agent
             this.ResumeLayout(false);
             this.PerformLayout();
         }
-
         private Label lb_Version;
         private Label label1;
         private Label label2;
