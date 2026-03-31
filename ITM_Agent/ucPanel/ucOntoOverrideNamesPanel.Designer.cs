@@ -1,9 +1,9 @@
-// ITM_Agent/ucPanel/ucOverrideNamesPanel.Designer.cs
+// ITM_Agent_Plus/ucPanel/ucOntoOverrideNamesPanel.Designer.cs
 using System.Windows.Forms;
 
 namespace ITM_Agent.ucPanel
 {
-    partial class ucOverrideNamesPanel
+    partial class ucOntoOverrideNamesPanel
     {
         #pragma warning disable 0414 // 경고 비활성화
         private System.ComponentModel.IContainer components = null;
@@ -117,13 +117,13 @@ namespace ITM_Agent.ucPanel
             this.cb_BaseDatePath.Size = new System.Drawing.Size(450, 20);
             this.cb_BaseDatePath.TabIndex = 0;
             //
-            // ucOverrideNamesPanel
+            // ucOntoOverrideNamesPanel
             //
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 12F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.Controls.Add(this.groupBox1);
             this.Controls.Add(this.splitContainer2);
-            this.Name = "ucOverrideNamesPanel";
+            this.Name = "ucOntoOverrideNamesPanel";
             this.Size = new System.Drawing.Size(676, 340);
             this.splitContainer2.Panel2.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)(this.splitContainer2)).EndInit();
