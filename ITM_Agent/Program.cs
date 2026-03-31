@@ -1,4 +1,4 @@
-// ITM_Agnet/Program.cs
+// ITM_Agnet_Plus/Program.cs
 using ITM_Agent.Services;
 using System;
 using System.IO;
@@ -34,7 +34,7 @@ namespace ITM_Agent
                 if (CultureInfo.CurrentUICulture.Name.StartsWith("ko"))
                 {
                     title = "권한 필요";
-                    message = "ITM Agent는 하드웨어 센서 정보 수집을 위해 관리자 권한이 필요합니다.\n\n" +
+                    message = "ITM Agent+는 하드웨어 센서 정보 수집을 위해 관리자 권한이 필요합니다.\n\n" +
                               "프로그램을 종료한 후, 실행 파일을 마우스 오른쪽 버튼으로 클릭하여 '관리자 권한으로 실행' 해주세요.";
                 }
                 else // 기본값은 영문
