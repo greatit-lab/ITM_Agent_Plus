@@ -1,7 +1,7 @@
-// ITM_Agent/ucPanel/ucUploadPanel.Designer.cs
+// ITM_Agent_Plus/ucPanel/ucOntoUploadPanel.Designer.cs
 namespace ITM_Agent.ucPanel
 {
-    partial class ucUploadPanel
+    partial class ucOntoUploadPanel
     {
         private System.ComponentModel.IContainer components = null;
 
@@ -277,12 +277,12 @@ namespace ITM_Agent.ucPanel
             this.dgvCat_PluginName.Resizable = System.Windows.Forms.DataGridViewTriState.True;
             this.dgvCat_PluginName.SortMode = System.Windows.Forms.DataGridViewColumnSortMode.Automatic;
             // 
-            // ucUploadPanel
+            // ucOntoUploadPanel
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 12F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.Controls.Add(this.tabControlUpload);
-            this.Name = "ucUploadPanel";
+            this.Name = "ucOntoUploadPanel";
             this.Size = new System.Drawing.Size(676, 340);
             this.tabControlUpload.ResumeLayout(false);
             this.tpCategorized.ResumeLayout(false);
