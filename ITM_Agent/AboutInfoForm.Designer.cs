@@ -1,4 +1,4 @@
-// ITM_Agent/AboutInfoForm.Designer.cs
+// ITM_Agent_Plus/AboutInfoForm.Designer.cs
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -46,12 +46,12 @@ namespace ITM_Agent
             //
             this.lblTitle.AutoSize = true;
             this.lblTitle.Font = new System.Drawing.Font("Segoe UI", 13F, System.Drawing.FontStyle.Bold);
+            this.lblTitle.ForeColor = System.Drawing.Color.DarkOrange;
             this.lblTitle.Location = new System.Drawing.Point(12, 19);
             this.lblTitle.Name = "lblTitle";
-            this.lblTitle.Size = new System.Drawing.Size(103, 25);
+            this.lblTitle.Size = new System.Drawing.Size(116, 25);
             this.lblTitle.TabIndex = 1;
-            this.lblTitle.Text = "ITM Agent";
-            this.lblTitle.ForeColor = System.Drawing.Color.DarkOrange;
+            this.lblTitle.Text = "ITM Agent+";
             //
             // grpDev
             //
@@ -96,19 +96,19 @@ namespace ITM_Agent
             //
             this.lb_Version.AutoSize = true;
             this.lb_Version.Font = new System.Drawing.Font("Segoe UI", 12F, System.Drawing.FontStyle.Bold);
-            this.lb_Version.Location = new System.Drawing.Point(113, 22);
+            this.lb_Version.ForeColor = System.Drawing.Color.DarkOrange;
+            this.lb_Version.Location = new System.Drawing.Point(121, 22);
             this.lb_Version.Name = "lb_Version";
             this.lb_Version.Size = new System.Drawing.Size(35, 21);
             this.lb_Version.TabIndex = 5;
             this.lb_Version.Text = "Ver";
-            this.lb_Version.ForeColor = System.Drawing.Color.DarkOrange;
             //
             // label1
             //
             this.label1.AutoSize = true;
             this.label1.Location = new System.Drawing.Point(172, 53);
             this.label1.Name = "label1";
-            this.label1.Size = new System.Drawing.Size(233, 12);
+            this.label1.Size = new System.Drawing.Size(0, 12);
             this.label1.TabIndex = 6;
             //
             // label2
@@ -116,7 +116,7 @@ namespace ITM_Agent
             this.label2.AutoSize = true;
             this.label2.Location = new System.Drawing.Point(172, 75);
             this.label2.Name = "label2";
-            this.label2.Size = new System.Drawing.Size(225, 12);
+            this.label2.Size = new System.Drawing.Size(0, 12);
             this.label2.TabIndex = 7;
             //
             // label3
@@ -124,7 +124,7 @@ namespace ITM_Agent
             this.label3.AutoSize = true;
             this.label3.Location = new System.Drawing.Point(173, 97);
             this.label3.Name = "label3";
-            this.label3.Size = new System.Drawing.Size(232, 12);
+            this.label3.Size = new System.Drawing.Size(0, 12);
             this.label3.TabIndex = 8;
             //
             // label4
@@ -133,11 +133,11 @@ namespace ITM_Agent
             this.label4.BackColor = System.Drawing.SystemColors.Control;
             this.label4.Location = new System.Drawing.Point(173, 117);
             this.label4.Name = "label4";
-            this.label4.Size = new System.Drawing.Size(161, 12);
+            this.label4.Size = new System.Drawing.Size(0, 12);
             this.label4.TabIndex = 9;
-            // 
+            //
             // AboutInfoForm
-            // 
+            //
             this.AcceptButton = this.btnOk;
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.None;
             this.ClientSize = new System.Drawing.Size(420, 240);
