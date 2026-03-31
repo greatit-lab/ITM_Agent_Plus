@@ -1,7 +1,7 @@
-// ITM_Agent/ucPanel/ucImageTransPanel.Designer.cs
+// ITM_Agent_Plus/ucPanel/ucOntoImageTransPanel.Designer.cs
 namespace ITM_Agent.ucPanel
 {
-    partial class ucImageTransPanel
+    partial class ucOntoImageTransPanel
     {
         #pragma warning disable 0414 // 경고 비활성화
         private System.ComponentModel.IContainer components = null;
@@ -179,12 +179,12 @@ namespace ITM_Agent.ucPanel
             this.btn_SelectOutputFolder.Text = "Select Folder";
             this.btn_SelectOutputFolder.UseVisualStyleBackColor = true;
             //
-            // ucImageTransPanel
+            // ucOntoImageTransPanel
             //
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 12F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.Controls.Add(this.splitContainer2);
-            this.Name = "ucImageTransPanel";
+            this.Name = "ucOntoImageTransPanel";
             this.Size = new System.Drawing.Size(676, 340);
             this.splitContainer2.Panel1.ResumeLayout(false);
             this.splitContainer2.Panel2.ResumeLayout(false);
