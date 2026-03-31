@@ -55,7 +55,7 @@ namespace ITM_Agent.Services
             get => GetValueFromSection("Option", "EnablePerfoLog") == "1";
             set
             {
-                isPerformanceLogging = value;                    
+                isPerformanceLogging = value;
                 SetValueToSection("Option", "EnablePerfoLog", value ? "1" : "0");
             }
         }
@@ -144,7 +144,7 @@ namespace ITM_Agent.Services
             catch (Exception ex)
             {
                 logManager.LogError($"[SettingsManager] WRITE failed: {ex.Message}");
-                throw; 
+                throw;
             }
         }
 
@@ -261,7 +261,7 @@ namespace ITM_Agent.Services
                 {
                     lines.Add(folder);
                 }
-                lines.Add(""); 
+                lines.Add("");
             }
             else
             {
@@ -468,7 +468,7 @@ namespace ITM_Agent.Services
                 {
                     if (lines.Count > 0 && !string.IsNullOrWhiteSpace(lines.Last()))
                     {
-                        lines.Add(""); 
+                        lines.Add("");
                     }
                     lines.Add($"[{section}]");
                     lines.Add($"{key} = {value}");
@@ -563,10 +563,10 @@ namespace ITM_Agent.Services
             var baseFolders = GetFoldersFromSection("[BaseFolder]");
             if (baseFolders.Count > 0)
             {
-                return baseFolders[0]; 
+                return baseFolders[0];
             }
 
-            return null; 
+            return null;
         }
 
         public void RemoveKeyFromSection(string section, string key)
