@@ -17,7 +17,7 @@ namespace ITM_Agent
         private bool isExiting = false;
         private SettingsManager settingsManager;
         private LogManager logManager;
-        
+
         // --- Common Services ---
         private FileWatcherManager fileWatcherManager;
         private EqpidManager eqpidManager;
@@ -65,8 +65,8 @@ namespace ITM_Agent
         private ucOntoUploadPanel ucOntoUploadPanel;
         private ucOntoLampLifePanel ucOntoLampLifePanel;
 
-        private bool isRunning = false; 
-        private bool isDebugMode = false;   
+        private bool isRunning = false;
+        private bool isDebugMode = false;
 
         protected override void OnLoad(EventArgs e)
         {
@@ -94,7 +94,7 @@ namespace ITM_Agent
             ucOntoImageTransPanel.ImageSaveFolderChanged += ucOntoUploadPanel.LoadImageSaveFolder_PathChanged;
 
             ucSc1 = new ucPanel.ucConfigurationPanel(settingsManager);
-            
+
             fileWatcherManager = new FileWatcherManager(settingsManager, logManager, isDebugMode);
 
             eqpidManager = new EqpidManager(settingsManager, logManager, VersionInfo);
@@ -114,7 +114,7 @@ namespace ITM_Agent
 
             SetFormIcon();
 
-            this.Text = $"ITM Agent - {VersionInfo}";
+            this.Text = $"ITM Agent Plus - {VersionInfo}";
             this.MaximizeBox = false;
 
             InitializeTrayIcon();
@@ -278,8 +278,8 @@ namespace ITM_Agent
             {
                 e.Cancel = true;
                 this.Hide();
-                trayIcon.BalloonTipTitle = "ITM Agent";
-                trayIcon.BalloonTipText = "ITM Agent가 백그라운드에서 실행 중입니다.";
+                trayIcon.BalloonTipTitle = "ITM Agent+";
+                trayIcon.BalloonTipText = "ITM Agent+가 백그라운드에서 실행 중입니다.";
                 trayIcon.ShowBalloonTip(3000);
                 return;
             }
@@ -345,7 +345,7 @@ namespace ITM_Agent
             else if (isActiveRunning)
             {
                 btn_Run.Enabled = false;
-                btn_Stop.Enabled = true; 
+                btn_Stop.Enabled = true;
                 btn_Quit.Enabled = false;
             }
             else
@@ -687,7 +687,7 @@ namespace ITM_Agent
             ucConfigPanel.InitializePanel(isRunning);
             ucPluginPanel.InitializePanel(isRunning);
             ucOptionPanel.InitializePanel(isRunning);
-            
+
             ucOntoOverrideNamesPanel.InitializePanel(isRunning);
         }
 
@@ -738,7 +738,7 @@ namespace ITM_Agent
             else if (control is ucOptionPanel opt) opt.InitializePanel(isRunning);
             else if (control is ucPluginPanel plg) plg.InitializePanel(isRunning);
             else if (control is ucOntoOverrideNamesPanel ov) ov.InitializePanel(isRunning);
-            else if (control is ucOntoUploadPanel upload) upload.InitializePanel(isRunning); 
+            else if (control is ucOntoUploadPanel upload) upload.InitializePanel(isRunning);
 
             if (control == ucOptionPanel)
             {
